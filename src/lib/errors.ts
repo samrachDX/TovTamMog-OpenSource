@@ -65,6 +65,12 @@ export const ERROR_CODES = [
   'CANNOT_REVIEW_OWN',
   'DATE_RANGE_INVALID',
   'EVENT_NOT_DRAFT',
+  // Files and roles
+  'FILE_TOO_LARGE',
+  'FILE_TYPE_NOT_ALLOWED',
+  'ROLE_IS_BUILT_IN',
+  'ROLE_IN_USE',
+  'PERMISSION_NOT_HELD',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -83,6 +89,8 @@ const STATUS: Partial<Record<ErrorCode, number>> = {
   PORTAL_ACCESS_DENIED: 403,
   CANNOT_MODIFY_SELF: 403,
   CANNOT_REVIEW_OWN: 403,
+  PERMISSION_NOT_HELD: 403,
+  FILE_TOO_LARGE: 413,
   ROLE_NOT_GRANTABLE: 403,
   NOT_FOUND: 404,
   VALIDATION: 400,

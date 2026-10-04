@@ -3,6 +3,7 @@ import { AppError } from '@/lib/errors';
 
 export const PERMISSIONS = [
   'employee.view', 'employee.create', 'employee.update', 'employee.enroll', 'employee.pin_reset',
+  'employee.sensitive.view',
   'branch.view', 'branch.manage',
   'schedule.view', 'schedule.manage',
   'attendance.view', 'attendance.clock', 'attendance.adjust', 'attendance.approve',
@@ -12,7 +13,7 @@ export const PERMISSIONS = [
   'notification.send',
   'report.export',
   'audit.view',
-  'role.assign',
+  'role.assign', 'role.manage',
   'security.settings.manage',
 ] as const;
 

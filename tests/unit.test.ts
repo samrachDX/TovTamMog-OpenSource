@@ -5,7 +5,7 @@ import { parseQrPayload, qrPayload } from '@/lib/attendance/qr';
 import { clockOutDeadline, earlyLeaveMinutes, lateMinutes } from '@/lib/attendance/engine';
 import { signInitData, verifyInitData } from '@/lib/telegram/init-data';
 import { assertPinAcceptable, lockMinutesFor } from '@/lib/auth/pin';
-import { can, branchScope, type Grant } from '@/lib/auth/permissions';
+import { can, branchScope, PERMISSIONS, type Grant } from '@/lib/auth/permissions';
 import { applyDigits, dictionaries, formatDate, formatLongDate, formatTime, localDate, t } from '@/lib/i18n';
 import { ERROR_CODES } from '@/lib/errors';
 
@@ -212,6 +212,8 @@ describe('i18n', () => {
   it('has the same keys in both languages and a message for every error code', () => {
     expect(Object.keys(dictionaries.en).sort()).toEqual(Object.keys(dictionaries['km-KH']).sort());
     for (const code of ERROR_CODES) expect(dictionaries['km-KH']).toHaveProperty(`errors.${code}`);
+    // Every permission needs a label, or the roles page would show a raw key.
+    for (const p of PERMISSIONS) expect(dictionaries['km-KH']).toHaveProperty(`perm.${p}`);
   });
   it('interpolates and formats for Cambodia', () => {
     expect(t('en', 'home.lateBy', { minutes: 7 })).toBe('7 min late');

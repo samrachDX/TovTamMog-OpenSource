@@ -46,9 +46,15 @@ Built and tested:
   each person's language; anyone can switch Telegram messages off.
 - Telegram bot: verified webhook (`/api/internal/telegram-webhook`) answering /start
   with a button that opens the app; an outbox with retries and backoff.
+- Employee profile: photo, gender and an identity document. Files are stored in the
+  database and served only through permission checks; opening an identity document needs
+  its own permission and is logged every time.
+- Custom roles (`/admin/roles`): duplicate a built-in role or start from nothing, choose
+  permissions and a level. A role can only contain permissions its author holds and must
+  sit below the author's own level.
 - Khmer/English dictionaries with a completeness check that runs in every build.
 
-Not built yet: employee import/export, file uploads (photos, logos, event images),
+Not built yet: employee import/export, branch logos and event images,
 editing shift templates, second-approver flow for high-risk changes, leave types and
 balances, scheduled (future-dated) publishing of events.
 

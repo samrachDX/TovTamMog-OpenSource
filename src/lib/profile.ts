@@ -8,6 +8,8 @@ export type Profile = {
   nameEn: string | null;
   category: { km: string; en: string };
   photoPath: string | null;
+  /** Changes whenever the photo does; null when there is none. */
+  photoVersion: string | null;
   locale: Locale;
   digits: Digits;
   notifyTelegram: boolean;
@@ -18,10 +20,11 @@ export type Profile = {
 export async function getProfile(db: Db, employeeId: string): Promise<Profile> {
   const rows = await db.query<{
     employee_code: string; name_km: string; name_en: string | null; photo_path: string | null;
-    locale: string | null; digits: Digits | null; notify_telegram: boolean; cat_km: string; cat_en: string;
+    locale: string | null; digits: Digits | null; notify_telegram: boolean; photo_version: string | null; cat_km: string; cat_en: string;
     default_locale: string; default_digits: Digits; timezone: string;
   }>(
     `select e.employee_code, e.name_km, e.name_en, e.photo_path, e.locale, e.digits, e.notify_telegram,
+            (select extract(epoch from f.uploaded_at)::bigint::text from employee_files f where f.employee_id = e.id and f.kind = 'photo') as photo_version,
             c.name_km as cat_km, c.name_en as cat_en, o.default_locale, o.default_digits, o.timezone
      from employees e
      join organizations o on o.id = e.org_id
@@ -45,6 +48,7 @@ export async function getProfile(db: Db, employeeId: string): Promise<Profile> {
     nameEn: e.name_en,
     category: { km: e.cat_km, en: e.cat_en },
     photoPath: e.photo_path,
+    photoVersion: e.photo_version,
     // Own preference, then the branch preference, then the organization default (Khmer).
     locale: resolveLocale(e.locale, primary?.locale, e.default_locale),
     digits: e.digits ?? e.default_digits,

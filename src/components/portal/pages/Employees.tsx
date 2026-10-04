@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { api } from '@/lib/client/api';
 import type { MessageKey } from '@/lib/i18n';
+import { Avatar } from '@/components/Avatar';
 import { useI18n } from '@/components/mini-app/i18n-context';
 import { usePortal } from '../PortalShell';
 import {
@@ -14,7 +15,7 @@ import {
 export type EmployeeItem = {
   id: string; employeeCode: string; nameKm: string; nameEn: string | null; category: string;
   categoryKm: string; categoryEn: string; status: 'active' | 'suspended' | 'inactive';
-  telegramLinked: boolean; pinSet: boolean;
+  telegramLinked: boolean; pinSet: boolean; photoVersion: string | null;
   branches: { id: string; nameKm: string; nameEn: string; isPrimary: boolean }[];
 };
 
@@ -44,7 +45,10 @@ export function Employees() {
 
   const columns: Column<EmployeeItem>[] = [
     { header: t('portal.emp.name'), primary: true, cell: (e) => (
-      <span>{name(e)} <span className="text-muted">· {e.employeeCode}</span></span>
+      <span className="flex items-center gap-2">
+        <Avatar src={`/api/portal/employees/${e.id}/files/photo`} version={e.photoVersion} name={name(e)} size={28} />
+        <span>{name(e)} <span className="text-muted">· {e.employeeCode}</span></span>
+      </span>
     ) },
     { header: t('portal.emp.category'), cell: (e) => (locale === 'km-KH' ? e.categoryKm : e.categoryEn) },
     { header: t('home.branch'), cell: (e) => e.branches.map((b) => name(b)).join(', ') || '—' },
@@ -113,7 +117,7 @@ export function Employees() {
 export function EmployeeForm({
   open, employee, onClose, onSaved,
 }: {
-  open: boolean; employee?: EmployeeItem & { phone: string | null }; onClose(): void; onSaved(id: string): void;
+  open: boolean; employee?: EmployeeItem & { phone: string | null; gender: string | null }; onClose(): void; onSaved(id: string): void;
 }) {
   return (
     <FormDialog key={open ? (employee?.id ?? 'new') : 'closed'} open={open} employee={employee} onClose={onClose} onSaved={onSaved} />
@@ -129,6 +133,7 @@ function FormDialog({ open, employee, onClose, onSaved }: Parameters<typeof Empl
     nameEn: employee?.nameEn ?? '',
     category: employee?.category ?? me.categories[0]?.key ?? '',
     phone: employee?.phone ?? '',
+    gender: employee?.gender ?? '',
     branchIds: employee?.branches.map((b) => b.id) ?? [],
     primaryBranchId: employee?.branches.find((b) => b.isPrimary)?.id ?? '',
   });
@@ -146,7 +151,7 @@ function FormDialog({ open, employee, onClose, onSaved }: Parameters<typeof Empl
           setBusy(true);
           setError(null);
           try {
-            const body = { ...form, primaryBranchId: form.primaryBranchId || form.branchIds[0] };
+            const body = { ...form, gender: form.gender || null, primaryBranchId: form.primaryBranchId || form.branchIds[0] };
             if (employee) {
               await api(`/api/portal/employees/${employee.id}`, { method: 'PATCH', body, locale });
               onSaved(employee.id);
@@ -179,6 +184,12 @@ function FormDialog({ open, employee, onClose, onSaved }: Parameters<typeof Empl
           </Field>
           <Field label={t('portal.phone')}>
             <TextInput type="tel" maxLength={30} value={form.phone} onChange={(e) => set('phone', e.target.value)} />
+          </Field>
+          <Field label={t('portal.emp.gender')}>
+            <Select value={form.gender} onChange={(e) => set('gender', e.target.value)}>
+              <option value="">{t('portal.emp.gender.unset')}</option>
+              {(['female', 'male', 'other'] as const).map((g) => <option key={g} value={g}>{t(`portal.emp.gender.${g}`)}</option>)}
+            </Select>
           </Field>
         </div>
         <fieldset className="rounded-lg border border-line px-3 pb-1">

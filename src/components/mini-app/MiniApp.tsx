@@ -293,7 +293,7 @@ function Flow() {
 function TabBar({ tab, unread, onChange }: { tab: Tab; unread: number; onChange(tab: Tab): void }) {
   const { t, num } = useI18n();
   const items: [Tab, string][] = [
-    ['home', t('nav.attendance')], ['history', t('nav.history')], ['requests', t('requests.title')], ['inbox', t('notifications.short')],
+    ['home', t('tab.home')], ['history', t('tab.history')], ['requests', t('tab.requests')], ['inbox', t('tab.inbox')],
   ];
   return (
     <>
@@ -310,7 +310,7 @@ function TabBar({ tab, unread, onChange }: { tab: Tab; unread: number; onChange(
                 type="button"
                 aria-current={tab === key ? 'page' : undefined}
                 onClick={() => onChange(key)}
-                className={`pressable min-h-14 w-full border-t-2 px-1 text-sm ${
+                className={`pressable min-h-14 w-full border-t-2 px-0.5 text-[13px] leading-tight whitespace-nowrap ${
                   tab === key ? 'border-primary-strong font-semibold text-ink' : 'border-transparent text-muted'
                 }`}
               >

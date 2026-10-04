@@ -62,3 +62,40 @@ export async function api<T>(
   }
   return data as T;
 }
+
+/** Authenticated request for something other than JSON: fetching or uploading a file. */
+export async function apiRaw(path: string, opts: { locale: Locale; method?: string; body?: Blob }): Promise<Response> {
+  const headers: Record<string, string> = { 'x-locale': opts.locale };
+  const token = getToken();
+  if (token) headers.authorization = `Bearer ${token}`;
+  let res: Response;
+  try {
+    res = await fetch(path, { method: opts.method ?? (opts.body ? 'PUT' : 'GET'), headers, body: opts.body, cache: 'no-store' });
+  } catch {
+    throw new ApiError('NETWORK', '', 0, null);
+  }
+  if (!res.ok) {
+    const data = (await res.json().catch(() => null)) as { error?: { code?: string; message?: string } } | null;
+    throw new ApiError(data?.error?.code ?? 'INTERNAL', data?.error?.message ?? '', res.status, data);
+  }
+  return res;
+}
+
+/** Scales an image down in the browser and re-encodes it as JPEG, so uploads stay small. */
+export async function shrinkImage(file: Blob, maxSide: number, quality = 0.85): Promise<Blob> {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new ApiError('INTERNAL', '', 0, null);
+  // White behind transparent PNGs, which JPEG cannot represent.
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  return new Promise((resolve, reject) =>
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new ApiError('INTERNAL', '', 0, null))), 'image/jpeg', quality),
+  );
+}

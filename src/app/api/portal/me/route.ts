@@ -1,5 +1,5 @@
 import { db } from '@/lib/db';
-import { listCategories, listRoles } from '@/lib/admin/employees';
+import { actorRank, listCategories, listRoles } from '@/lib/admin/employees';
 import { getProfile } from '@/lib/profile';
 import { handle, json, portalActor } from '@/lib/http';
 
@@ -10,7 +10,7 @@ export function GET(req: Request) {
     const [profile, categories, roles, branches] = await Promise.all([
       getProfile(db, actor.employeeId),
       listCategories(db, actor),
-      listRoles(db),
+      listRoles(db, actor.orgId),
       // Branch names for pickers: every branch the actor holds any permission for.
       db.query<{ id: string; nameKm: string; nameEn: string; status: string }>(
         `select id, name_km as "nameKm", name_en as "nameEn", status from branches
@@ -24,6 +24,8 @@ export function GET(req: Request) {
       employeeId: actor.employeeId,
       profile: { employeeCode: profile.employeeCode, nameKm: profile.nameKm, nameEn: profile.nameEn, locale: profile.locale, digits: profile.digits, timezone: profile.timezone },
       grants: actor.grants,
+      // The highest level this person holds organization-wide; limits the roles they can manage.
+      rank: await actorRank(db, actor),
       branches,
       categories,
       roles,

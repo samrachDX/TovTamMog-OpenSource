@@ -2,6 +2,7 @@
 
 import { localHour, type MessageKey } from '@/lib/i18n';
 import { useI18n } from './i18n-context';
+import { Avatar } from '@/components/Avatar';
 import { FeedSection, type Feed } from './Feed';
 import { Button, LanguageSwitch, Notice } from './ui';
 
@@ -14,6 +15,7 @@ export type Me = {
     category: { km: string; en: string };
     branches: { id: string; nameKm: string; nameEn: string; isPrimary: boolean }[];
     notifyTelegram: boolean;
+    photoVersion: string | null;
   };
   feed: Feed;
   overview: {
@@ -60,12 +62,7 @@ export function Home({ me, onClock }: { me: Me; onClock(action: 'clock_in' | 'cl
     <>
       <header className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
-          <span
-            aria-hidden="true"
-            className="flex size-12 shrink-0 items-center justify-center rounded-full bg-pale text-lg font-semibold"
-          >
-            {[...displayName][0]}
-          </span>
+          <Avatar src="/api/me/photo" version={profile.photoVersion} name={displayName} />
           <div className="min-w-0">
             <p className="text-sm text-muted">{t(greeting)}</p>
             <p className="text-lg font-semibold leading-[1.6]">{displayName}</p>

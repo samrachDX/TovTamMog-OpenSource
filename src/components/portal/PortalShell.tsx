@@ -16,9 +16,10 @@ export type PortalMe = {
   employeeId: string;
   profile: { employeeCode: string; nameKm: string; nameEn: string | null; locale: Locale; digits: Digits; timezone: string };
   grants: { permission: string; branchId: string | null }[];
+  rank: number;
   branches: (Named & { status: string })[];
   categories: { key: string; nameKm: string; nameEn: string }[];
-  roles: { key: string; nameKm: string; nameEn: string; rank: number }[];
+  roles: { key: string; nameKm: string; nameEn: string; rank: number; builtIn: boolean }[];
 };
 
 type Portal = {
@@ -48,6 +49,7 @@ const NAV: { href: string; label: MessageKey; permission: string }[] = [
   { href: '/hr/requests', label: 'nav.requests', permission: 'request.review' },
   { href: '/admin/events', label: 'nav.events', permission: 'event.create' },
   { href: '/admin/branches', label: 'nav.branches', permission: 'branch.view' },
+  { href: '/admin/roles', label: 'nav.roles', permission: 'role.manage' },
   { href: '/admin/audit', label: 'nav.audit', permission: 'audit.view' },
 ];
 

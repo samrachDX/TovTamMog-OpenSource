@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useState } from 'react';
-import { api } from '@/lib/client/api';
+import { api, apiRaw, shrinkImage } from '@/lib/client/api';
+import { Avatar } from '@/components/Avatar';
 import { useI18n } from '@/components/mini-app/i18n-context';
 import { usePortal } from '../PortalShell';
 import {
@@ -12,7 +13,7 @@ import {
 import { EmployeeForm, STATUS_TONE, statusKey, type EmployeeItem } from './Employees';
 
 type Detail = EmployeeItem & {
-  phone: string | null; telegramUsername: string | null; pinLockedUntil: string | null; createdAt: string;
+  phone: string | null; gender: 'male' | 'female' | 'other' | null; nationalIdUploadedAt: string | null; telegramUsername: string | null; pinLockedUntil: string | null; createdAt: string;
   roles: { id: string; roleKey: string; nameKm: string; nameEn: string; branchId: string | null }[];
 };
 
@@ -33,6 +34,46 @@ export function EmployeeDetail() {
   const [code, setCode] = useState<{ code: string; expiresAt: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [grant, setGrant] = useState({ roleKey: '', branchId: '' });
+  const [uploading, setUploading] = useState<'photo' | 'national_id' | null>(null);
+
+  /** Photos are shrunk to 512px; ID images to 1800px. PDFs are sent as they are. */
+  const upload = async (kind: 'photo' | 'national_id', file: File | undefined) => {
+    if (!file) return;
+    setUploading(kind);
+    setError(null);
+    try {
+      const body = file.type === 'application/pdf' ? file : await shrinkImage(file, kind === 'photo' ? 512 : 1800);
+      await apiRaw(`/api/portal/employees/${id}/files/${kind}`, { body, locale });
+      state.reload();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setUploading(null);
+    }
+  };
+  const removeFile = async (kind: 'photo' | 'national_id') => {
+    setError(null);
+    try {
+      await apiRaw(`/api/portal/employees/${id}/files/${kind}`, { method: 'DELETE', locale });
+      state.reload();
+    } catch (err) {
+      setError(errorText(err));
+    }
+  };
+  /** Opens the identity document in a new tab from memory; it is never given a public address. */
+  const viewId = async () => {
+    setError(null);
+    const tab = window.open('', '_blank');
+    try {
+      const blob = await (await apiRaw(`/api/portal/employees/${id}/files/national_id`, { locale })).blob();
+      const url = URL.createObjectURL(blob);
+      if (tab) tab.location.href = url;
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      tab?.close();
+      setError(errorText(err));
+    }
+  };
 
   const act = async (body: Record<string, unknown>) => {
     await api(`/api/portal/employees/${id}/actions`, { body, locale });
@@ -60,11 +101,23 @@ export function EmployeeDetail() {
               {error ? <Notice tone="danger">{error}</Notice> : null}
 
               <Card title={t('portal.emp.details')}>
+                <div className="mb-4 flex flex-wrap items-center gap-4">
+                  <Avatar src={`/api/portal/employees/${e.id}/files/photo`} version={e.photoVersion} name={name(e)} size={88} />
+                  {inScope('employee.update') ? (
+                    <div className="flex flex-wrap gap-2">
+                      <FilePick accept="image/jpeg,image/png,image/webp" busy={uploading === 'photo'} onPick={(f) => void upload('photo', f)}>
+                        {t(e.photoVersion ? 'portal.emp.photoChange' : 'portal.emp.photoAdd')}
+                      </FilePick>
+                      {e.photoVersion ? <SmallButton tone="danger" onClick={() => void removeFile('photo')}>{t('portal.remove')}</SmallButton> : null}
+                    </div>
+                  ) : null}
+                </div>
                 <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
                   <Item label={t('portal.nameKm')} value={e.nameKm} />
                   <Item label={t('portal.nameEn')} value={e.nameEn || '—'} />
                   <Item label={t('portal.emp.category')} value={locale === 'km-KH' ? e.categoryKm : e.categoryEn} />
                   <Item label={t('portal.phone')} value={e.phone || '—'} />
+                  <Item label={t('portal.emp.gender')} value={e.gender ? t(`portal.emp.gender.${e.gender}`) : '—'} />
                   <Item label={t('portal.emp.branches')} value={e.branches.map((b) => name(b) + (b.isPrimary && e.branches.length > 1 ? ` (${t('portal.emp.primary')})` : '')).join(', ') || '—'} />
                   <Item label={t('portal.status')} value={<Badge tone={STATUS_TONE[e.status]}>{t(statusKey(e.status))}</Badge>} />
                 </dl>
@@ -78,6 +131,26 @@ export function EmployeeDetail() {
                   </div>
                 ) : null}
               </Card>
+
+              {can('employee.sensitive.view') ? (
+                <Card title={t('portal.emp.nationalId')}>
+                  <p className="mb-3 text-sm text-muted">{t('portal.emp.nationalIdNote')}</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge tone={e.nationalIdUploadedAt ? 'ok' : 'muted'}>
+                      {e.nationalIdUploadedAt ? t('portal.emp.nationalIdOn', { at: dateTime(e.nationalIdUploadedAt) }) : t('portal.emp.nationalIdNone')}
+                    </Badge>
+                    {e.nationalIdUploadedAt ? <SmallButton onClick={() => void viewId()}>{t('portal.view')}</SmallButton> : null}
+                    {inScope('employee.update') ? (
+                      <>
+                        <FilePick accept="image/jpeg,image/png,image/webp,application/pdf" busy={uploading === 'national_id'} onPick={(f) => void upload('national_id', f)}>
+                          {t(e.nationalIdUploadedAt ? 'portal.emp.fileReplace' : 'portal.emp.fileUpload')}
+                        </FilePick>
+                        {e.nationalIdUploadedAt ? <SmallButton tone="danger" onClick={() => void removeFile('national_id')}>{t('portal.remove')}</SmallButton> : null}
+                      </>
+                    ) : null}
+                  </div>
+                </Card>
+              ) : null}
 
               <Card title={t('portal.emp.access')}>
                 <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
@@ -198,6 +271,23 @@ export function EmployeeDetail() {
         }}
       </LoadState>
     </>
+  );
+}
+
+/** A button that opens the file chooser. The input is reset so the same file can be picked twice. */
+function FilePick({ accept, busy, onPick, children }: { accept: string; busy: boolean; onPick(file: File | undefined): void; children: React.ReactNode }) {
+  const { t } = useI18n();
+  return (
+    <label className={`pressable inline-flex min-h-10 cursor-pointer items-center rounded-lg border border-line bg-surface px-3 py-1.5 text-sm font-semibold hover:bg-pale focus-within:outline focus-within:outline-[3px] focus-within:outline-ink ${busy ? 'pointer-events-none opacity-50' : ''}`}>
+      <input
+        type="file"
+        accept={accept}
+        className="sr-only"
+        disabled={busy}
+        onChange={(e) => { onPick(e.target.files?.[0]); e.target.value = ''; }}
+      />
+      {busy ? t('common.loading') : children}
+    </label>
   );
 }
 

@@ -10,6 +10,8 @@ import {
 
 type Input = Record<string, unknown>;
 
+export const GENDERS = ['male', 'female', 'other'] as const;
+
 export type EmployeeListItem = {
   id: string;
   employeeCode: string;
@@ -21,12 +23,16 @@ export type EmployeeListItem = {
   status: 'active' | 'suspended' | 'inactive';
   telegramLinked: boolean;
   pinSet: boolean;
+  /** Changes whenever the photo does; null when there is none. Used to refresh the image. */
+  photoVersion: string | null;
   branches: { id: string; nameKm: string; nameEn: string; isPrimary: boolean }[];
 };
 
 const LIST_SELECT = `
   select e.id, e.employee_code, e.name_km, e.name_en, e.category, c.name_km as category_km,
-         c.name_en as category_en, e.status, e.phone,
+         c.name_en as category_en, e.status, e.phone, e.gender,
+         (select extract(epoch from f.uploaded_at)::bigint::text from employee_files f where f.employee_id = e.id and f.kind = 'photo') as photo_version,
+         (select f.uploaded_at from employee_files f where f.employee_id = e.id and f.kind = 'national_id') as national_id_at,
          (e.telegram_user_id is not null) as telegram_linked, e.telegram_username,
          (e.pin_hash is not null and not e.pin_reset_required) as pin_set,
          e.pin_locked_until, e.created_at,
@@ -45,6 +51,7 @@ const IN_SCOPE = `e.org_id = $1 and ($2::uuid[] is null or exists (
 type Row = {
   id: string; employee_code: string; name_km: string; name_en: string | null; category: string;
   category_km: string; category_en: string; status: EmployeeListItem['status']; phone: string | null;
+  gender: 'male' | 'female' | 'other' | null; photo_version: string | null; national_id_at: Date | null;
   telegram_linked: boolean; telegram_username: string | null; pin_set: boolean;
   pin_locked_until: Date | null; created_at: Date; branches: EmployeeListItem['branches'] | string;
 };
@@ -61,6 +68,7 @@ function item(r: Row): EmployeeListItem {
     status: r.status,
     telegramLinked: r.telegram_linked,
     pinSet: r.pin_set,
+    photoVersion: r.photo_version,
     branches: typeof r.branches === 'string' ? JSON.parse(r.branches) : r.branches,
   };
 }
@@ -86,6 +94,9 @@ export async function listEmployees(db: Db, actor: Actor, filter: Input = {}) {
 
 export type EmployeeDetail = EmployeeListItem & {
   phone: string | null;
+  gender: 'male' | 'female' | 'other' | null;
+  /** When an identity document was uploaded, or null. The document itself needs `employee.sensitive.view`. */
+  nationalIdUploadedAt: Date | null;
   telegramUsername: string | null;
   pinLockedUntil: Date | null;
   createdAt: Date;
@@ -93,7 +104,7 @@ export type EmployeeDetail = EmployeeListItem & {
 };
 
 /** Loads an employee if, and only if, the actor may see them under `permission`. */
-async function loadScoped(db: Db, actor: Actor, id: string, permission: Parameters<typeof scopeOf>[1], lock = false) {
+export async function loadScoped(db: Db, actor: Actor, id: string, permission: Parameters<typeof scopeOf>[1], lock = false) {
   const scope = scopeOf(actor, permission);
   const rows = await db.query<Row>(
     `${LIST_SELECT} where ${IN_SCOPE} and e.id = $3 ${lock ? 'for update of e' : ''}`,
@@ -115,6 +126,8 @@ export async function getEmployee(db: Db, actor: Actor, id: string): Promise<Emp
   return {
     ...item(r),
     phone: r.phone,
+    gender: r.gender,
+    nationalIdUploadedAt: r.national_id_at,
     telegramUsername: r.telegram_username,
     pinLockedUntil: r.pin_locked_until,
     createdAt: r.created_at,
@@ -161,6 +174,7 @@ export async function createEmployee(db: Db, actor: Actor, input: Input): Promis
     nameEn: optText(input, 'nameEn', 120),
     category: text(input, 'category', { max: 50 }),
     phone: optText(input, 'phone', 30),
+    gender: input.gender ? oneOf(input, 'gender', GENDERS) : null,
   };
   return db.tx(async (tx) => {
     await assertBranches(tx, actor, branchIds, 'employee.create');
@@ -168,9 +182,9 @@ export async function createEmployee(db: Db, actor: Actor, input: Input): Promis
     let id: string;
     try {
       const rows = await tx.query<{ id: string }>(
-        `insert into employees (org_id, employee_code, name_km, name_en, category, phone)
-         values ($1, $2, $3, $4, $5, $6) returning id`,
-        [actor.orgId, data.code, data.nameKm, data.nameEn, data.category, data.phone],
+        `insert into employees (org_id, employee_code, name_km, name_en, category, phone, gender)
+         values ($1, $2, $3, $4, $5, $6, $7) returning id`,
+        [actor.orgId, data.code, data.nameKm, data.nameEn, data.category, data.phone, data.gender],
       );
       id = rows[0].id;
     } catch (err) {
@@ -199,13 +213,14 @@ export async function updateEmployee(db: Db, actor: Actor, id: string, input: In
       name_en: input.nameEn === undefined ? before.name_en : optText(input, 'nameEn', 120),
       category: input.category === undefined ? before.category : text(input, 'category', { max: 50 }),
       phone: input.phone === undefined ? before.phone : optText(input, 'phone', 30),
+      gender: input.gender === undefined ? before.gender : input.gender ? oneOf(input, 'gender', GENDERS) : null,
     };
     if (next.category !== before.category) await assertCategory(tx, actor.orgId, next.category);
     try {
       await tx.query(
-        `update employees set employee_code = $2, name_km = $3, name_en = $4, category = $5, phone = $6, updated_at = $7
+        `update employees set employee_code = $2, name_km = $3, name_en = $4, category = $5, phone = $6, gender = $8, updated_at = $7
          where id = $1`,
-        [id, next.employee_code, next.name_km, next.name_en, next.category, next.phone, actor.now ?? new Date()],
+        [id, next.employee_code, next.name_km, next.name_en, next.category, next.phone, actor.now ?? new Date(), next.gender],
       );
     } catch (err) {
       if (isUniqueViolation(err)) throw new AppError('EMPLOYEE_CODE_TAKEN');
@@ -228,7 +243,7 @@ export async function updateEmployee(db: Db, actor: Actor, id: string, input: In
       entityId: id,
       before: {
         employee_code: before.employee_code, name_km: before.name_km, name_en: before.name_en,
-        category: before.category, phone: before.phone, branchIds: item(before).branches.map((b) => b.id),
+        category: before.category, phone: before.phone, gender: before.gender, branchIds: item(before).branches.map((b) => b.id),
       },
       after: next, ip: actor.ip, at: actor.now,
     });
@@ -291,13 +306,15 @@ export async function resetEmployeePin(db: Db, actor: Actor, id: string, input: 
 
 // ---- roles ------------------------------------------------------------------
 
-export async function listRoles(db: Db) {
-  return db.query<{ key: string; nameKm: string; nameEn: string; rank: number }>(
-    `select key, name_km as "nameKm", name_en as "nameEn", rank from roles order by rank desc`,
+export async function listRoles(db: Db, orgId: string) {
+  return db.query<{ key: string; nameKm: string; nameEn: string; rank: number; builtIn: boolean }>(
+    `select key, name_km as "nameKm", name_en as "nameEn", rank, (org_id is null) as "builtIn"
+     from roles where org_id is null or org_id = $1 order by rank desc, name_en`,
+    [orgId],
   );
 }
 
-async function actorRank(db: Db, actor: Actor): Promise<number> {
+export async function actorRank(db: Db, actor: Actor): Promise<number> {
   const rows = await db.query<{ rank: number | null }>(
     `select max(r.rank)::int as rank from role_assignments ra join roles r on r.key = ra.role_key
      where ra.employee_id = $1 and ra.revoked_at is null and ra.branch_id is null`,
@@ -313,7 +330,8 @@ async function actorRank(db: Db, actor: Actor): Promise<number> {
 async function assertGrantable(db: Db, actor: Actor, targetId: string, roleKey: string) {
   requireCan(actor, 'role.assign');
   if (targetId === actor.employeeId) throw new AppError('CANNOT_MODIFY_SELF');
-  const role = await db.query<{ rank: number }>(`select rank from roles where key = $1`, [roleKey]);
+  // Built-in roles, or this organization's own. Another organization's role does not exist here.
+  const role = await db.query<{ rank: number }>(`select rank from roles where key = $1 and (org_id is null or org_id = $2)`, [roleKey, actor.orgId]);
   if (!role[0]) throw new AppError('VALIDATION', { field: 'roleKey' });
   const mine = await actorRank(db, actor);
   const allowed = roleKey === 'super_admin' ? mine >= 100 : role[0].rank < mine;
