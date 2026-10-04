@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import Script from 'next/script';
-import '@fontsource-variable/noto-sans-khmer';
+import '@fontsource-variable/lexend';
+import '@fontsource-variable/kantumruy-pro';
 import './globals.css';
 import { DEFAULT_LOCALE, t } from '@/lib/i18n';
 
