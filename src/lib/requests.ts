@@ -4,8 +4,9 @@ import { recordAudit } from '@/lib/audit';
 import { approvers, branchRecipients, notify } from '@/lib/notifications';
 import { t, type MessageKey } from '@/lib/i18n';
 import { can } from '@/lib/auth/permissions';
-import { earlyLeaveMinutes, lateMinutes } from '@/lib/attendance/engine';
-import { DATE, TIME, date, oneOf, optText, optUuid, paging, requireCan, scopeOf, text, uuid, type Actor } from '@/lib/admin/actor';
+import { expectedHours, recomputeLateness } from '@/lib/attendance/leave';
+import { earlyLeaveMinutes, lateMinutes } from '@/lib/attendance/timing';
+import { DATE, TIME, date, oneOf, optText, optUuid, paging, requireCan, scopeOf, text, time, uuid, type Actor } from '@/lib/admin/actor';
 
 type Input = Record<string, unknown>;
 
@@ -84,10 +85,22 @@ export async function createRequest(db: Db, who: { employeeId: string; orgId: st
     let proposedOut: Date | null = null;
     let previousStatus: string | null = null;
     let recordBranchId: string | null = null;
+    let leaveUnit: 'day' | 'half_day' | 'hours' = 'day';
+    let halfDayPart: 'morning' | 'afternoon' | null = null;
+    let startTime: string | null = null;
+    let endTime: string | null = null;
 
     if (type === 'leave' || type === 'absence') {
       startDate = date(input, 'startDate');
-      endDate = input.endDate === undefined || type === 'absence' ? startDate : date(input, 'endDate');
+      if (type === 'leave' && input.leaveUnit !== undefined) leaveUnit = oneOf(input, 'leaveUnit', ['day', 'half_day', 'hours'] as const);
+      if (leaveUnit === 'half_day') halfDayPart = oneOf(input, 'halfDayPart', ['morning', 'afternoon'] as const);
+      if (leaveUnit === 'hours') {
+        startTime = time(input, 'startTime');
+        endTime = time(input, 'endTime');
+        if (endTime <= startTime) throw new AppError('INVALID_TIME_RANGE');
+      }
+      // Part-day leave is for one day.
+      endDate = input.endDate === undefined || type === 'absence' || leaveUnit !== 'day' ? startDate : date(input, 'endDate');
       const days = (Date.parse(endDate) - Date.parse(startDate)) / 86_400_000;
       if (days < 0 || days >= MAX_LEAVE_DAYS) throw new AppError('DATE_RANGE_INVALID');
     } else {
@@ -118,9 +131,11 @@ export async function createRequest(db: Db, who: { employeeId: string; orgId: st
     try {
       const rows = await tx.query<{ id: string }>(
         `insert into employee_requests (org_id, employee_id, type, reason, start_date, end_date, attendance_record_id,
-           proposed_clock_in_at, proposed_clock_out_at, previous_record_status, created_at, updated_at)
-         values ($1, $2, $3, $4, $5::date, $6::date, $7, $8, $9, $10, $11, $11) returning id`,
-        [who.orgId, who.employeeId, type, why, startDate, endDate, recordId, proposedIn, proposedOut, previousStatus, now],
+           proposed_clock_in_at, proposed_clock_out_at, previous_record_status, created_at, updated_at,
+           leave_unit, half_day_part, start_time, end_time)
+         values ($1, $2, $3, $4, $5::date, $6::date, $7, $8, $9, $10, $11, $11, $12, $13, $14::time, $15::time) returning id`,
+        [who.orgId, who.employeeId, type, why, startDate, endDate, recordId, proposedIn, proposedOut, previousStatus, now,
+          leaveUnit, halfDayPart, startTime, endTime],
       );
       id = rows[0].id;
     } catch (err) {
@@ -156,6 +171,8 @@ export async function createRequest(db: Db, who: { employeeId: string; orgId: st
 
 const REQUEST_SELECT = `
   select q.id, q.type, q.status, q.reason, q.start_date::text as "startDate", q.end_date::text as "endDate",
+         q.leave_unit as "leaveUnit", q.half_day_part as "halfDayPart",
+         to_char(q.start_time, 'HH24:MI') as "startTime", to_char(q.end_time, 'HH24:MI') as "endTime",
          q.attendance_record_id as "attendanceRecordId", q.proposed_clock_in_at as "proposedClockInAt",
          q.proposed_clock_out_at as "proposedClockOutAt", q.created_at as "createdAt", q.decided_at as "decidedAt",
          q.decision_note as "decisionNote",
@@ -243,8 +260,11 @@ async function applyAdjustment(
   const clockOut = change.clockOut ?? rec.clock_out_at;
   if (!clockIn || !clockOut) throw new AppError('INVALID_CORRECTION');
   checkTimes(rec, clockIn, clockOut, meta.now);
-  const late = rec.shift_start ? lateMinutes(clockIn, rec.shift_start, rec.late_grace_minutes) : 0;
-  const early = rec.shift_end ? earlyLeaveMinutes(clockOut, rec.shift_end, rec.early_leave_grace_minutes) : 0;
+  const expected = rec.shift_start && rec.shift_end
+    ? await expectedHours(db, { employeeId: rec.employee_id, workDate: rec.work_date, shiftStart: rec.shift_start, shiftEnd: rec.shift_end, timezone: rec.timezone })
+    : null;
+  const late = expected ? lateMinutes(clockIn, expected.start, rec.late_grace_minutes) : 0;
+  const early = expected ? earlyLeaveMinutes(clockOut, expected.end, rec.early_leave_grace_minutes) : 0;
   const worked = Math.floor((clockOut.getTime() - clockIn.getTime()) / MINUTE);
   const original = {
     status: rec.status === 'pending_correction' ? undefined : rec.status,
@@ -369,10 +389,10 @@ export async function decideRequest(db: Db, actor: Actor, id: string, input: Inp
     const rows = await tx.query<{
       employee_id: string; org_id: string; type: RequestType; status: string; reason: string;
       attendance_record_id: string | null; previous_record_status: string | null;
-      proposed_clock_in_at: Date | null; proposed_clock_out_at: Date | null;
+      proposed_clock_in_at: Date | null; proposed_clock_out_at: Date | null; leave_unit: string; start_date: string | null;
     }>(
       `select employee_id, org_id, type, status, reason, attendance_record_id, previous_record_status,
-              proposed_clock_in_at, proposed_clock_out_at
+              proposed_clock_in_at, proposed_clock_out_at, leave_unit, start_date::text as start_date
        from employee_requests where id = $1 for update`,
       [id],
     );
@@ -404,6 +424,11 @@ export async function decideRequest(db: Db, actor: Actor, id: string, input: Inp
     await tx.query(`insert into request_events (request_id, actor_employee_id, action, note, created_at) values ($1, $2, $3, $4, $5)`, [
       id, actor.employeeId, decision, note, now,
     ]);
+    // Part-day leave changes when the person was expected that day, so lateness already
+    // recorded for it is worked out again. Clock times stay as they are.
+    if (decision === 'approved' && req.type === 'leave' && req.leave_unit !== 'day' && req.start_date) {
+      await recomputeLateness(tx, req.employee_id, req.start_date, now);
+    }
     await notify(tx, actor.orgId, [{
       employeeId: req.employee_id, kind: decision === 'approved' ? 'request_approved' : 'request_rejected', data: { requestId: id },
       params: (locale) => ({ type: t(locale, `requests.type.${req.type}` as MessageKey), note: note ?? '—' }),

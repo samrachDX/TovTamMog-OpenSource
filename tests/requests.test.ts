@@ -209,11 +209,74 @@ describe('leave, explanations and absences', () => {
   });
 });
 
+describe('half-day and hourly leave', () => {
+  const leave = (now: Date, extra: Record<string, unknown>) =>
+    createRequest(db, me(now), { type: 'leave', reason: 'ទៅមន្ទីរពេទ្យ', ...extra });
+
+  it('validates the shape of each kind', async () => {
+    await expect(leave(day(16), { startDate: '2026-10-21', leaveUnit: 'half_day' })).rejects.toThrow('VALIDATION');
+    await expect(leave(day(16), { startDate: '2026-10-21', leaveUnit: 'hours', startTime: '10:00', endTime: '09:00' })).rejects.toThrow('INVALID_TIME_RANGE');
+    await expect(leave(day(16), { startDate: '2026-10-21', leaveUnit: 'hours', startTime: '10:00' })).rejects.toThrow('VALIDATION');
+    await expect(leave(day(16), { startDate: '2026-10-21', leaveUnit: 'weeks' })).rejects.toThrow('VALIDATION');
+    // Part-day leave is always a single day, whatever end date is sent.
+    const { id } = await leave(day(16), { startDate: '2026-10-21', endDate: '2026-10-25', leaveUnit: 'half_day', halfDayPart: 'morning' });
+    const mine = await listMyRequests(db, f.employeeId) as { id: string; endDate: string; leaveUnit: string; halfDayPart: string }[];
+    expect(mine.find((r) => r.id === id)).toMatchObject({ endDate: '2026-10-21', leaveUnit: 'half_day', halfDayPart: 'morning' });
+    await cancelMyRequest(db, me(day(16)), id);
+  });
+
+  it('approved morning half-day: arriving at the shift midpoint is on time', async () => {
+    await addShift(db, f, day(21), day(21, 9)); // 08:00–16:00, midpoint 12:00
+    const { id } = await leave(day(16), { startDate: '2026-10-21', leaveUnit: 'half_day', halfDayPart: 'morning' });
+    await decideRequest(db, manager, id, { decision: 'approved' });
+    const cin = await tap(f.employeeId, 'clock_in', day(21, 5, 3)); // 12:03
+    expect(cin.ok && cin.record.lateMinutes).toBe(0);
+    const cout = await tap(f.employeeId, 'clock_out', day(21, 9));
+    expect(cout.ok && cout.record).toMatchObject({ earlyLeaveMinutes: 0, workedMinutes: 237 });
+  });
+
+  it('approved hours at the end of the shift: leaving then is not early; leaving sooner still is', async () => {
+    await addShift(db, f, day(22), day(22, 9));
+    const { id } = await leave(day(16), { startDate: '2026-10-22', leaveUnit: 'hours', startTime: '14:00', endTime: '16:00' });
+    await decideRequest(db, manager, id, { decision: 'approved' });
+    await tap(f.employeeId, 'clock_in', day(22));
+    const cout = await tap(f.employeeId, 'clock_out', day(22, 6, 30)); // 13:30, half an hour before the leave starts
+    expect(cout.ok && cout.record.earlyLeaveMinutes).toBe(30);
+  });
+
+  it('leave in the middle of the shift changes nothing; a pending request changes nothing', async () => {
+    await addShift(db, f, day(23), day(23, 9));
+    const mid = await leave(day(16), { startDate: '2026-10-23', leaveUnit: 'hours', startTime: '11:00', endTime: '12:00' });
+    await decideRequest(db, manager, mid.id, { decision: 'approved' });
+    await leave(day(16), { startDate: '2026-10-23', leaveUnit: 'hours', startTime: '08:00', endTime: '10:00' }); // left pending
+    const cin = await tap(f.employeeId, 'clock_in', day(23, 3)); // 10:00
+    expect(cin.ok && cin.record.lateMinutes).toBe(120);
+    await tap(f.employeeId, 'clock_out', day(23, 9));
+  });
+
+  it('approving after the fact removes the lateness already recorded, without touching the times', async () => {
+    const [rec] = await db.query<{ id: string }>(`select id from attendance_records where work_date = '2026-10-23'`);
+    const before = await record(rec.id);
+    expect(before.late_minutes).toBe(120);
+    const [pending] = await db.query<{ id: string }>(`select id from employee_requests where start_date = '2026-10-23' and status = 'pending'`);
+    await decideRequest(db, manager, pending.id, { decision: 'approved', note: 'យល់ព្រម' });
+    const after = await record(rec.id);
+    expect(after).toMatchObject({ late_minutes: 0, clock_in_at: before.clock_in_at, clock_out_at: before.clock_out_at, worked_minutes: before.worked_minutes });
+  });
+
+  it('part-day leave does not excuse a whole missed shift', async () => {
+    await addShift(db, f, day(24), day(24, 9));
+    const { id } = await leave(day(16), { startDate: '2026-10-24', leaveUnit: 'half_day', halfDayPart: 'afternoon' });
+    await decideRequest(db, manager, id, { decision: 'approved' });
+    expect(await runAttendanceMaintenance(db, { now: day(24, 11) })).toMatchObject({ absences: 1 });
+  });
+});
+
 describe('history and export', () => {
   it('filters the employee history', async () => {
     const all = await listMyAttendance(db, f.employeeId, { from: '2026-10-01', to: '2026-10-31' }) as { workDate: string; status: string }[];
-    expect(all.map((r) => r.workDate)).toEqual(['2026-10-14', '2026-10-09', '2026-10-07', '2026-10-05']);
-    expect((await listMyAttendance(db, f.employeeId, { from: '2026-10-01', to: '2026-10-31', status: 'absent' }) as unknown[]).length).toBe(1);
+    expect(all.map((r) => r.workDate)).toEqual(['2026-10-24', '2026-10-23', '2026-10-22', '2026-10-21', '2026-10-14', '2026-10-09', '2026-10-07', '2026-10-05']);
+    expect((await listMyAttendance(db, f.employeeId, { from: '2026-10-01', to: '2026-10-31', status: 'absent' }) as unknown[]).length).toBe(2);
     await expect(listMyAttendance(db, f.employeeId, { from: '2026-01-01', to: '2026-12-31' })).rejects.toThrow('DATE_RANGE_INVALID');
   });
 

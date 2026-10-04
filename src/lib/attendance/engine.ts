@@ -5,6 +5,8 @@ import { hitRateLimit } from '@/lib/auth/rate-limit';
 import { localDate } from '@/lib/i18n';
 import { checkLocation, type LocationReading } from './geo';
 import { ipAllowed } from './ip';
+import { expectedHours } from './leave';
+import { earlyLeaveMinutes, lateMinutes } from './timing';
 
 export type ClockAction = 'clock_in' | 'clock_out';
 
@@ -121,17 +123,7 @@ type BranchRow = {
 
 const MINUTE = 60_000;
 
-/** Whole minutes late, or 0 when within the grace period. */
-export function lateMinutes(now: Date, shiftStart: Date, graceMinutes: number): number {
-  const late = Math.floor((now.getTime() - shiftStart.getTime()) / MINUTE);
-  return late > graceMinutes ? late : 0;
-}
-
-/** Whole minutes left before shift end, or 0 when within the grace period. */
-export function earlyLeaveMinutes(now: Date, shiftEnd: Date, graceMinutes: number): number {
-  const early = Math.ceil((shiftEnd.getTime() - now.getTime()) / MINUTE);
-  return early > graceMinutes ? early : 0;
-}
+export { earlyLeaveMinutes, lateMinutes } from './timing';
 
 /**
  * Latest moment an open record can still be clocked out. After this it is a missed
@@ -273,10 +265,10 @@ export async function clock(db: Db, input: ClockInput): Promise<ClockResult> {
     }
 
     // Current state: at most one open record per employee (also enforced by a unique index).
-    const opens = await tx.query<RecordRow & { shift_end: Date | null }>(
+    const opens = await tx.query<RecordRow & { shift_start: Date | null; shift_end: Date | null }>(
       `select r.id, r.branch_id, r.shift_assignment_id, r.work_date::text as work_date, r.clock_in_at,
               r.clock_out_at, r.status, r.late_minutes, r.early_leave_minutes, r.worked_minutes,
-              sa.end_at as shift_end
+              sa.start_at as shift_start, sa.end_at as shift_end
        from attendance_records r left join shift_assignments sa on sa.id = r.shift_assignment_id
        where r.employee_id = $1 and r.status = 'clocked_in'`,
       [emp.id],
@@ -337,20 +329,27 @@ export async function clock(db: Db, input: ClockInput): Promise<ClockResult> {
 
     let row: RecordRow;
     if (input.action === 'clock_in') {
+      const workDate = shift?.work_date ?? localDate(now, branch.timezone);
+      // Approved part-day leave moves when the person is expected to arrive.
+      const expected = shift
+        ? await expectedHours(tx, { employeeId: emp.id, workDate, shiftStart: shift.start_at, shiftEnd: shift.end_at, timezone: branch.timezone })
+        : null;
       const inserted = await tx.query<RecordRow>(
         `insert into attendance_records (org_id, employee_id, branch_id, shift_assignment_id, work_date,
            clock_in_at, status, late_minutes, created_at, updated_at)
          values ($1, $2, $3, $4, $5::date, $6, 'clocked_in', $7, $6, $6)
          returning ${RECORD_COLUMNS}`,
         [
-          emp.org_id, emp.id, branch.id, shift?.id ?? null,
-          shift?.work_date ?? localDate(now, branch.timezone), now,
-          shift ? lateMinutes(now, shift.start_at, branch.late_grace_minutes) : 0,
+          emp.org_id, emp.id, branch.id, shift?.id ?? null, workDate, now,
+          expected ? lateMinutes(now, expected.start, branch.late_grace_minutes) : 0,
         ],
       );
       row = inserted[0];
     } else {
-      const early = open!.shift_end ? earlyLeaveMinutes(now, open!.shift_end, branch.early_leave_grace_minutes) : 0;
+      const expected = open!.shift_start && open!.shift_end
+        ? await expectedHours(tx, { employeeId: emp.id, workDate: open!.work_date, shiftStart: open!.shift_start, shiftEnd: open!.shift_end, timezone: branch.timezone })
+        : null;
+      const early = expected ? earlyLeaveMinutes(now, expected.end, branch.early_leave_grace_minutes) : 0;
       const worked = Math.max(0, Math.floor((now.getTime() - open!.clock_in_at!.getTime()) / MINUTE));
       const updated = await tx.query<RecordRow>(
         `update attendance_records

@@ -357,7 +357,7 @@ export const km = {
   'requests.type.late': 'បញ្ជាក់មូលហេតុមកយឺត',
   'requests.type.missed_clock_out': 'កែតម្រូវការភ្លេចកត់ម៉ោងចេញ',
   'requests.type.correction': 'កែតម្រូវវត្តមាន',
-  'requests.help.leave': 'ជ្រើសរើសថ្ងៃដែលអ្នកចង់សុំច្បាប់ រួចបញ្ជាក់មូលហេតុ។',
+  'requests.help.leave': 'ជ្រើសរើសថាសុំច្បាប់ពេញថ្ងៃ កន្លះថ្ងៃ ឬជាម៉ោង រួចបញ្ជាក់មូលហេតុ។',
   'requests.help.absence': 'ជ្រើសរើសថ្ងៃដែលអ្នកអវត្តមាន រួចបញ្ជាក់មូលហេតុ។',
   'requests.help.late': 'បញ្ជាក់មូលហេតុដែលអ្នកមកយឺតនៅថ្ងៃនេះ។',
   'requests.help.missed_clock_out': 'បញ្ចូលម៉ោងដែលអ្នកបានចេញពីការងារពិតប្រាកដ។ ប្រធានរបស់អ្នកនឹងពិនិត្យសំណើនេះ។',
@@ -532,6 +532,17 @@ export const km = {
   'perm.role.assign': 'ផ្តល់ និងដកតួនាទី',
   'perm.role.manage': 'បង្កើត និងកែតួនាទី',
   'perm.audit.view': 'មើលកំណត់ត្រាសវនកម្ម',
+
+  // ---- Part-day leave ----
+  'requests.leaveLength': 'រយៈពេលសុំច្បាប់',
+  'requests.unit.day': 'ពេញថ្ងៃ',
+  'requests.unit.half_day': 'កន្លះថ្ងៃ',
+  'requests.unit.hours': 'ជាម៉ោង',
+  'requests.part.morning': 'ពេលព្រឹក',
+  'requests.part.afternoon': 'ពេលរសៀល',
+  'requests.halfNote': 'កន្លះថ្ងៃ គឺពាក់កណ្តាលនៃវេនការងាររបស់អ្នកនៅថ្ងៃនោះ។',
+  'requests.fromTime': 'ពីម៉ោង',
+  'requests.toTime': 'ដល់ម៉ោង',
 } as const;
 
 export type MessageKey = keyof typeof km;

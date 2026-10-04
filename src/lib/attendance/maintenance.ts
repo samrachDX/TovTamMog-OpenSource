@@ -47,7 +47,7 @@ export async function runAttendanceMaintenance(
        and not exists (select 1 from attendance_records r where r.shift_assignment_id = sa.id)
        and not exists (
          select 1 from employee_requests q
-         where q.employee_id = sa.employee_id and q.type = 'leave' and q.status = 'approved'
+         where q.employee_id = sa.employee_id and q.type = 'leave' and q.leave_unit = 'day' and q.status = 'approved'
            and sa.work_date between q.start_date and q.end_date)
        and not exists (
          select 1 from events ev

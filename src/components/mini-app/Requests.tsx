@@ -8,7 +8,8 @@ import type { RequestKind } from './RequestForm';
 
 type Item = {
   id: string; type: RequestKind; status: 'pending' | 'approved' | 'rejected' | 'cancelled'; reason: string;
-  startDate: string | null; endDate: string | null; workDate: string | null; proposedClockInAt: string | null;
+  startDate: string | null; endDate: string | null; workDate: string | null;
+  leaveUnit: 'day' | 'half_day' | 'hours'; halfDayPart: 'morning' | 'afternoon' | null; startTime: string | null; endTime: string | null; proposedClockInAt: string | null;
   proposedClockOutAt: string | null; createdAt: string; decidedAt: string | null; decisionNote: string | null;
   reviewerKm: string | null; reviewerEn: string | null;
 };
@@ -19,7 +20,7 @@ const TONE = {
 } as const;
 
 export function Requests({ onNew }: { onNew(kind: RequestKind): void }) {
-  const { t, locale, day, time, dateTime, errorText } = useI18n();
+  const { t, locale, day, time, dateTime, num, errorText } = useI18n();
   const [tick, setTick] = useState(0);
   const [state, setState] = useState<{ tick: number; items: Item[] | null; error: string | null }>({ tick: -1, items: null, error: null });
   const [error, setError] = useState<string | null>(null);
@@ -49,9 +50,12 @@ export function Requests({ onNew }: { onNew(kind: RequestKind): void }) {
   };
 
   const km = locale === 'km-KH';
-  const period = (r: Item) =>
-    r.startDate ? (r.endDate && r.endDate !== r.startDate ? `${day(r.startDate)} – ${day(r.endDate)}` : day(r.startDate))
-      : r.workDate ? day(r.workDate) : '';
+  const period = (r: Item) => {
+    if (!r.startDate) return r.workDate ? day(r.workDate) : '';
+    if (r.leaveUnit === 'half_day' && r.halfDayPart) return `${day(r.startDate)} · ${t(`requests.part.${r.halfDayPart}`)}`;
+    if (r.leaveUnit === 'hours') return `${day(r.startDate)} · ${num(r.startTime ?? '')}–${num(r.endTime ?? '')}`;
+    return r.endDate && r.endDate !== r.startDate ? `${day(r.startDate)} – ${day(r.endDate)}` : day(r.startDate);
+  };
 
   return (
     <>

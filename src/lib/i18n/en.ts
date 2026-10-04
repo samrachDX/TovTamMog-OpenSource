@@ -358,7 +358,7 @@ export const en: Record<MessageKey, string> = {
   'requests.type.late': 'Late-arrival explanation',
   'requests.type.missed_clock_out': 'Missed clock-out correction',
   'requests.type.correction': 'Attendance correction',
-  'requests.help.leave': 'Choose the days you want off and say why.',
+  'requests.help.leave': 'Choose full days, half a day or a few hours, and say why.',
   'requests.help.absence': 'Choose the day you were absent and say why.',
   'requests.help.late': 'Say why you arrived late on this day.',
   'requests.help.missed_clock_out': 'Enter the time you actually left work. Your manager will review it.',
@@ -533,4 +533,15 @@ export const en: Record<MessageKey, string> = {
   'perm.role.assign': 'Grant and remove roles',
   'perm.role.manage': 'Create and edit roles',
   'perm.audit.view': 'View the audit log',
+
+  // ---- Part-day leave ----
+  'requests.leaveLength': 'Length of leave',
+  'requests.unit.day': 'Full day',
+  'requests.unit.half_day': 'Half day',
+  'requests.unit.hours': 'Hours',
+  'requests.part.morning': 'Morning',
+  'requests.part.afternoon': 'Afternoon',
+  'requests.halfNote': 'Half a day is half of your shift on that day.',
+  'requests.fromTime': 'From',
+  'requests.toTime': 'To',
 };

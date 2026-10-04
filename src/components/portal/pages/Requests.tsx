@@ -12,6 +12,7 @@ type Kind = 'leave' | 'absence' | 'late' | 'missed_clock_out' | 'correction';
 type Item = {
   id: string; type: Kind; status: 'pending' | 'approved' | 'rejected' | 'cancelled'; reason: string;
   startDate: string | null; endDate: string | null; workDate: string | null;
+  leaveUnit: 'day' | 'half_day' | 'hours'; halfDayPart: 'morning' | 'afternoon' | null; startTime: string | null; endTime: string | null;
   proposedClockInAt: string | null; proposedClockOutAt: string | null; clockInAt: string | null; clockOutAt: string | null;
   createdAt: string; decidedAt: string | null; decisionNote: string | null; employeeId: string; employeeCode: string;
   nameKm: string; nameEn: string | null; reviewerKm: string | null; reviewerEn: string | null;
@@ -23,7 +24,7 @@ const TONE = { pending: 'warn', approved: 'ok', rejected: 'bad', cancelled: 'mut
 const LIMIT = 50;
 
 export function Requests() {
-  const { t, locale, day, time, dateTime, errorText } = useI18n();
+  const { t, locale, day, time, dateTime, num, errorText } = useI18n();
   const { me, name, can } = usePortal();
   const [status, setStatus] = useState('pending');
   const [type, setType] = useState('');
@@ -41,9 +42,12 @@ export function Requests() {
     [status, type, branchId, offset],
   );
 
-  const period = (r: Item) =>
-    r.startDate ? (r.endDate && r.endDate !== r.startDate ? `${day(r.startDate)} – ${day(r.endDate)}` : day(r.startDate))
-      : r.workDate ? day(r.workDate) : '—';
+  const period = (r: Item) => {
+    if (!r.startDate) return r.workDate ? day(r.workDate) : '—';
+    if (r.leaveUnit === 'half_day' && r.halfDayPart) return `${day(r.startDate)} · ${t(`requests.part.${r.halfDayPart}`)}`;
+    if (r.leaveUnit === 'hours') return `${day(r.startDate)} · ${num(r.startTime ?? '')}–${num(r.endTime ?? '')}`;
+    return r.endDate && r.endDate !== r.startDate ? `${day(r.startDate)} – ${day(r.endDate)}` : day(r.startDate);
+  };
   const columns: Column<Item>[] = [
     { header: t('portal.emp.name'), primary: true, cell: (r) => <span>{name(r)} <span className="text-muted">· {r.employeeCode}</span></span> },
     { header: t('requests.kind'), cell: (r) => t(`requests.type.${r.type}`) },

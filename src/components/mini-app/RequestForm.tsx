@@ -26,6 +26,10 @@ export function RequestForm({ kind, record, onDone }: { kind: RequestKind; recor
   const today = localDate(new Date(), timeZone);
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
+  const [unit, setUnit] = useState<'day' | 'half_day' | 'hours'>('day');
+  const [part, setPart] = useState<'morning' | 'afternoon'>('morning');
+  const [fromTime, setFromTime] = useState('08:00');
+  const [toTime, setToTime] = useState('10:00');
   const [clockIn, setClockIn] = useState('');
   const [clockOut, setClockOut] = useState('');
   const [outNextDay, setOutNextDay] = useState(false);
@@ -35,14 +39,20 @@ export function RequestForm({ kind, record, onDone }: { kind: RequestKind; recor
 
   const needsOut = kind === 'missed_clock_out';
   const timesOk = kind === 'correction' ? !!(clockIn || clockOut) : needsOut ? !!clockOut : true;
-  const valid = reason.trim().length >= 3 && timesOk && (kind !== 'leave' || endDate >= startDate);
+  const leaveOk = kind !== 'leave' || (unit === 'day' ? endDate >= startDate : unit === 'hours' ? toTime > fromTime : true);
+  const valid = reason.trim().length >= 3 && timesOk && leaveOk;
 
   const submit = async () => {
     setBusy(true);
     setError(null);
     try {
       const body: Record<string, unknown> = { type: kind, reason: reason.trim() };
-      if (kind === 'leave') Object.assign(body, { startDate, endDate });
+      if (kind === 'leave') {
+        Object.assign(body, { startDate, leaveUnit: unit });
+        if (unit === 'day') body.endDate = endDate;
+        if (unit === 'half_day') body.halfDayPart = part;
+        if (unit === 'hours') Object.assign(body, { startTime: fromTime, endTime: toTime });
+      }
       if (kind === 'absence') Object.assign(body, { startDate });
       if (record) {
         body.attendanceRecordId = record.id;
@@ -73,14 +83,65 @@ export function RequestForm({ kind, record, onDone }: { kind: RequestKind; recor
       ) : null}
 
       {kind === 'leave' ? (
-        <div className="grid grid-cols-2 gap-3">
-          <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('portal.from')}</span>
-            <input type="date" required className={INPUT} value={startDate} onChange={(e) => { setStartDate(e.target.value); if (e.target.value > endDate) setEndDate(e.target.value); }} />
-          </label>
-          <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('portal.to')}</span>
-            <input type="date" required min={startDate} className={INPUT} value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-          </label>
-        </div>
+        <>
+          <div role="radiogroup" aria-label={t('requests.leaveLength')} className="grid grid-cols-3 gap-1 rounded-xl bg-pale p-1 text-sm">
+            {(['day', 'half_day', 'hours'] as const).map((u) => (
+              <button
+                key={u}
+                type="button"
+                role="radio"
+                aria-checked={unit === u}
+                onClick={() => setUnit(u)}
+                className={`pressable min-h-10 rounded-lg px-1 ${unit === u ? 'bg-surface font-semibold shadow-sm' : 'text-muted'}`}
+              >
+                {t(`requests.unit.${u}`)}
+              </button>
+            ))}
+          </div>
+          {unit === 'day' ? (
+            <div className="grid grid-cols-2 gap-3">
+              <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('portal.from')}</span>
+                <input type="date" required className={INPUT} value={startDate} onChange={(e) => { setStartDate(e.target.value); if (e.target.value > endDate) setEndDate(e.target.value); }} />
+              </label>
+              <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('portal.to')}</span>
+                <input type="date" required min={startDate} className={INPUT} value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+              </label>
+            </div>
+          ) : (
+            <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('portal.date')}</span>
+              <input type="date" required className={INPUT} value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            </label>
+          )}
+          {unit === 'half_day' ? (
+            <>
+              <div role="radiogroup" aria-label={t('requests.unit.half_day')} className="grid grid-cols-2 gap-3">
+                {(['morning', 'afternoon'] as const).map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    role="radio"
+                    aria-checked={part === p}
+                    onClick={() => setPart(p)}
+                    className={`pressable min-h-12 rounded-xl border ${part === p ? 'border-primary-strong bg-pale font-semibold' : 'border-line'}`}
+                  >
+                    {t(`requests.part.${p}`)}
+                  </button>
+                ))}
+              </div>
+              <p className="text-sm text-muted">{t('requests.halfNote')}</p>
+            </>
+          ) : null}
+          {unit === 'hours' ? (
+            <div className="grid grid-cols-2 gap-3">
+              <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('requests.fromTime')}</span>
+                <input type="time" required className={INPUT} value={fromTime} onChange={(e) => setFromTime(e.target.value)} />
+              </label>
+              <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('requests.toTime')}</span>
+                <input type="time" required className={INPUT} value={toTime} onChange={(e) => setToTime(e.target.value)} />
+              </label>
+            </div>
+          ) : null}
+        </>
       ) : null}
       {kind === 'absence' ? (
         <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('portal.date')}</span>
