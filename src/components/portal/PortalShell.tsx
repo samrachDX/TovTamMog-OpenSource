@@ -6,6 +6,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { ApiError, api, getToken, setToken } from '@/lib/client/api';
 import { telegram } from '@/lib/client/telegram';
 import type { Digits, Locale, MessageKey } from '@/lib/i18n';
+import { Brand } from '@/components/Brand';
 import { I18nProvider, useI18n } from '@/components/mini-app/i18n-context';
 import { PinPad } from '@/components/mini-app/PinPad';
 import { Button, Header, LanguageSwitch, Notice, Screen, Spinner } from '@/components/mini-app/ui';
@@ -144,7 +145,8 @@ function Gate({ children }: { children: ReactNode }) {
   }, [start]);
 
   const top = (
-    <div className="flex justify-end">
+    <div className="flex items-center justify-between gap-3">
+      <Brand form="long" height={28} priority />
       <LanguageSwitch />
     </div>
   );
@@ -154,6 +156,9 @@ function Gate({ children }: { children: ReactNode }) {
   if (phase.name === 'boot') {
     return (
       <Screen center>
+        <div className="flex justify-center">
+          <Brand form="stacked" height={150} priority />
+        </div>
         <Spinner label={t('auth.signingIn')} />
       </Screen>
     );
@@ -273,7 +278,11 @@ function Frame({ me, children, onSignOut }: { me: PortalMe; children: ReactNode;
       <div className="min-h-dvh bg-[#f6f9fc]">
         <header className="border-b border-line bg-surface">
           <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-2">
-            <span className="font-semibold">{t('app.name')}</span>
+            <Link href="/admin" aria-label={t('nav.dashboard')} className="flex items-center">
+              {/* The icon alone on phones, where the header is crowded; the full logo otherwise. */}
+              <Brand form="mark" height={32} className="sm:hidden" priority />
+              <Brand form="long" height={28} className="hidden sm:block" priority />
+            </Link>
             <div className="flex items-center gap-3">
               <span className="hidden text-sm text-muted sm:inline">{portal.name(me.profile)} · {me.profile.employeeCode}</span>
               <LanguageSwitch />

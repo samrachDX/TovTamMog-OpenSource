@@ -1,7 +1,7 @@
 import type { MessageKey } from './km';
 
 export const en: Record<MessageKey, string> = {
-  'app.name': 'Tov Tam Mog',
+  'app.name': 'TovTamMog',
   'app.tagline': 'Employee attendance system',
 
   'common.loading': 'Loading…',

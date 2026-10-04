@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError, api, getToken, setToken } from '@/lib/client/api';
 import { telegram } from '@/lib/client/telegram';
 import type { Digits, Locale } from '@/lib/i18n';
+import { Brand } from '@/components/Brand';
 import { ClockFlow } from './ClockFlow';
 import { EventPopup } from './Feed';
 import { History } from './History';
@@ -118,7 +119,8 @@ function Flow() {
   };
 
   const topBar = (
-    <div className="flex justify-end">
+    <div className="flex items-center justify-between gap-3">
+      <Brand form="long" height={28} priority />
       <LanguageSwitch />
     </div>
   );
@@ -127,6 +129,9 @@ function Flow() {
     case 'boot':
       return (
         <Screen center>
+          <div className="flex justify-center">
+            <Brand form="stacked" height={150} priority />
+          </div>
           <Spinner label={t('auth.signingIn')} />
         </Screen>
       );

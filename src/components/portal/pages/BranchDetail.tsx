@@ -386,11 +386,17 @@ function QrCard({ b, reload }: CardProps) {
     const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
     w.document.write(`<!doctype html><html lang="km"><head><meta charset="utf-8"><title>${esc(b.code)}</title>
       <style>body{font-family:"Noto Sans Khmer","Khmer OS Battambang",sans-serif;text-align:center;padding:24px;color:#243b53;line-height:1.7}
-      svg{width:320px;height:320px}h1{font-size:28px;margin:0}p{font-size:18px;margin:4px 0}</style></head>
-      <body><h1>${esc(b.nameKm)}</h1><p>${esc(b.nameEn)}</p>${svg}<p>${esc(t('attendance.scanPopup'))}</p></body></html>`);
+      svg{width:320px;height:320px}h1{font-size:28px;margin:12px 0 0}p{font-size:18px;margin:4px 0}img{height:44px}</style></head>
+      <body><img src="${window.location.origin}/brand/logo-long.png" alt="TovTamMog"><h1>${esc(b.nameKm)}</h1><p>${esc(b.nameEn)}</p>${svg}<p>${esc(t('attendance.scanPopup'))}</p></body></html>`);
     w.document.close();
     w.focus();
-    w.print();
+    // Wait for the logo, or it prints as an empty box.
+    const logo = w.document.querySelector('img');
+    const go = () => w.print();
+    if (logo && !logo.complete) {
+      logo.addEventListener('load', go, { once: true });
+      logo.addEventListener('error', go, { once: true });
+    } else go();
   };
 
   return (
