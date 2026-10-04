@@ -6,8 +6,11 @@ export async function GET() {
   try {
     await db.query('select 1');
     database = true;
-  } catch {
+  } catch (err) {
     database = false;
+    // The reason goes to the server log only; the response stays free of details.
+    const e = err as { message?: string; code?: string };
+    console.error('[health] database check failed:', e?.code ?? '', e?.message ?? err);
   }
   return Response.json(
     { status: database ? 'ok' : 'degraded', database },
