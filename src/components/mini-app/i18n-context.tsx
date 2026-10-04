@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
-  DEFAULT_DIGITS, DEFAULT_LOCALE, DEFAULT_TIMEZONE, applyDigits, formatLongDate, formatTime, t as translate,
+  DEFAULT_DIGITS, DEFAULT_LOCALE, DEFAULT_TIMEZONE, applyDigits, formatDate, formatLongDate, formatTime, t as translate,
   type Digits, type Locale, type MessageKey, type MessageParams,
 } from '@/lib/i18n';
 import { ApiError } from '@/lib/client/api';
@@ -19,6 +19,10 @@ type I18n = {
   num(text: string | number): string;
   time(value: Date | string): string;
   longDate(value: Date | string): string;
+  /** dd/mm/yyyy for a calendar date string (YYYY-MM-DD); no timezone conversion. */
+  day(value: string): string;
+  /** dd/mm/yyyy hh:mm for an instant. */
+  dateTime(value: Date | string): string;
   /** Translated text for a failed request. */
   errorText(err: unknown): string;
 };
@@ -59,6 +63,8 @@ export function I18nProvider({ children, onLocaleChange }: { children: ReactNode
       num: (text) => applyDigits(String(text), digits),
       time: (v) => formatTime(new Date(v), fmt),
       longDate: (v) => formatLongDate(new Date(v), fmt),
+      day: (v) => applyDigits(v.split('-').reverse().join('/'), digits),
+      dateTime: (v) => `${formatDate(new Date(v), fmt)} ${formatTime(new Date(v), fmt)}`,
       errorText(err) {
         if (err instanceof ApiError) {
           if (err.code === 'NETWORK') return t('errors.NETWORK');

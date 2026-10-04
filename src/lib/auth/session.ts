@@ -1,7 +1,7 @@
 import type { Db } from '@/lib/db/types';
 import { AppError } from '@/lib/errors';
 import { recordAudit, recordSecurityEvent } from '@/lib/audit';
-import { verifyInitData, type TelegramUser } from '@/lib/telegram/init-data';
+import { verifyInitData, verifyLoginWidget, type TelegramUser, type VerifiedInitData } from '@/lib/telegram/init-data';
 import { keyedHash, newSessionToken, normalizeEnrollmentCode, newEnrollmentCode } from './crypto';
 import { hitRateLimit } from './rate-limit';
 
@@ -50,11 +50,34 @@ async function createSession(
 }
 
 /** Step 1: exchange verified Telegram initData for an application session. */
-export async function authenticateTelegram(
+export function authenticateTelegram(
   db: Db,
   cfg: AuthConfig,
   initDataRaw: string,
   meta: RequestMeta = {},
+): Promise<AuthResult> {
+  return authenticate(db, cfg, meta, (now) =>
+    verifyInitData(initDataRaw, cfg.botToken, { maxAgeSeconds: cfg.initDataMaxAgeSeconds, now }),
+  );
+}
+
+/** Same as above for the portal in a desktop browser, using the Telegram Login Widget. */
+export function authenticateLoginWidget(
+  db: Db,
+  cfg: AuthConfig,
+  data: Record<string, unknown>,
+  meta: RequestMeta = {},
+): Promise<AuthResult> {
+  return authenticate(db, cfg, meta, (now) =>
+    verifyLoginWidget(data, cfg.botToken, { maxAgeSeconds: cfg.initDataMaxAgeSeconds, now }),
+  );
+}
+
+async function authenticate(
+  db: Db,
+  cfg: AuthConfig,
+  meta: RequestMeta,
+  verify: (now: Date) => VerifiedInitData,
 ): Promise<AuthResult> {
   const now = meta.now ?? new Date();
   if (meta.ip) {
@@ -63,7 +86,7 @@ export async function authenticateTelegram(
   }
   let verified;
   try {
-    verified = verifyInitData(initDataRaw, cfg.botToken, { maxAgeSeconds: cfg.initDataMaxAgeSeconds, now });
+    verified = verify(now);
   } catch (err) {
     if (err instanceof AppError && err.code === 'TELEGRAM_INIT_DATA_INVALID') {
       await recordSecurityEvent(db, { type: 'auth.init_data_invalid', severity: 'warning', ip: meta.ip, at: now });

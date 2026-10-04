@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useI18n } from './i18n-context';
 import { Header, Notice } from './ui';
 
@@ -35,6 +35,21 @@ export function PinPad({
       setPin('');
     }
   };
+
+  // Physical keyboard, for the portal on a desktop.
+  const pressRef = useRef(press);
+  useEffect(() => {
+    pressRef.current = press;
+  });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (/^[0-9]$/.test(e.key)) pressRef.current(e.key);
+      else if (e.key === 'Backspace') setPin((p) => p.slice(0, -1));
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   return (
     <div className="flex flex-1 flex-col gap-6">

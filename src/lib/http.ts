@@ -4,7 +4,8 @@ import { env } from '@/lib/env';
 import { AppError, errorMessageKey, type ErrorCode } from '@/lib/errors';
 import { resolveLocale, t, type Locale } from '@/lib/i18n';
 import { parseIp } from '@/lib/attendance/ip';
-import { getSession, type AuthConfig, type Session } from '@/lib/auth/session';
+import { getSession, requirePin, type AuthConfig, type Session } from '@/lib/auth/session';
+import { hasPortalAccess, loadActor, type Actor } from '@/lib/admin/actor';
 
 export function authConfig(): AuthConfig {
   const e = env();
@@ -70,6 +71,29 @@ export async function sessionFrom(req: Request): Promise<Session> {
   const header = req.headers.get('authorization') ?? '';
   const token = header.startsWith('Bearer ') ? header.slice(7).trim() : null;
   return getSession(db, authConfig(), token);
+}
+
+/**
+ * The portal user behind a request: a live session with a verified PIN, belonging to
+ * someone who holds at least one management permission. Each service call then checks
+ * the specific permission and branch scope it needs.
+ */
+export async function portalActor(req: Request): Promise<Actor> {
+  const session = await sessionFrom(req);
+  requirePin(session);
+  const actor = await loadActor(db, { employeeId: session.employeeId, orgId: session.orgId }, { ip: clientIp(req) });
+  if (!hasPortalAccess(actor.grants)) throw new AppError('PORTAL_ACCESS_DENIED');
+  return actor;
+}
+
+/** Query string as a plain object; `limit` and `offset` become numbers. */
+export function queryInput(req: Request): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of new URL(req.url).searchParams) {
+    if (v === '') continue;
+    out[k] = k === 'limit' || k === 'offset' ? Number(v) : v;
+  }
+  return out;
 }
 
 /** Wraps a route handler: translated errors for the user, details only in server logs. */

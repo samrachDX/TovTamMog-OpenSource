@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { AppError } from '@/lib/errors';
 
 export type TelegramUser = {
@@ -99,4 +99,55 @@ export function signInitData(fields: Record<string, string>, botToken: string): 
   const secret = createHmac('sha256', 'WebAppData').update(botToken).digest();
   const hash = createHmac('sha256', secret).update(pairs.join('\n')).digest('hex');
   return new URLSearchParams({ ...fields, hash }).toString();
+}
+
+/**
+ * Validates data from the Telegram Login Widget (used by the portal on desktop browsers),
+ * as documented at https://core.telegram.org/widgets/login#checking-authorization
+ *
+ *   secret = SHA256(bot_token)
+ *   hash   = hex(HMAC_SHA256(key = secret, message = data_check_string))
+ */
+export function verifyLoginWidget(
+  data: Record<string, unknown>,
+  botToken: string,
+  opts: { maxAgeSeconds: number; now?: Date },
+): VerifiedInitData {
+  const allowed = ['id', 'first_name', 'last_name', 'username', 'photo_url', 'auth_date'];
+  const hash = data.hash;
+  if (typeof hash !== 'string' || !/^[0-9a-f]{64}$/.test(hash)) throw new AppError('TELEGRAM_INIT_DATA_INVALID');
+  const pairs: string[] = [];
+  for (const key of allowed) {
+    const value = data[key];
+    if (value === undefined || value === null) continue;
+    if (typeof value !== 'string' && typeof value !== 'number') throw new AppError('TELEGRAM_INIT_DATA_INVALID');
+    pairs.push(`${key}=${value}`);
+  }
+  pairs.sort();
+  const secret = createHash('sha256').update(botToken).digest();
+  const expected = createHmac('sha256', secret).update(pairs.join('\n')).digest();
+  const received = Buffer.from(hash, 'hex');
+  if (received.length !== expected.length || !timingSafeEqual(received, expected)) {
+    throw new AppError('TELEGRAM_INIT_DATA_INVALID');
+  }
+  const authDateSeconds = Number(data.auth_date);
+  const id = String(data.id ?? '');
+  if (!Number.isInteger(authDateSeconds) || authDateSeconds <= 0 || !/^\d{1,20}$/.test(id)) {
+    throw new AppError('TELEGRAM_INIT_DATA_INVALID');
+  }
+  const nowSeconds = Math.floor((opts.now ?? new Date()).getTime() / 1000);
+  if (nowSeconds - authDateSeconds > opts.maxAgeSeconds) throw new AppError('TELEGRAM_INIT_DATA_EXPIRED');
+  if (authDateSeconds - nowSeconds > 60) throw new AppError('TELEGRAM_INIT_DATA_INVALID');
+  const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
+  return {
+    user: { id, firstName: str(data.first_name), lastName: str(data.last_name), username: str(data.username) },
+    authDate: new Date(authDateSeconds * 1000),
+  };
+}
+
+/** Builds signed Login Widget data. Used by tests only. */
+export function signLoginWidget(fields: Record<string, string | number>, botToken: string): Record<string, string | number> {
+  const pairs = Object.entries(fields).map(([k, v]) => `${k}=${v}`).sort();
+  const secret = createHash('sha256').update(botToken).digest();
+  return { ...fields, hash: createHmac('sha256', secret).update(pairs.join('\n')).digest('hex') };
 }

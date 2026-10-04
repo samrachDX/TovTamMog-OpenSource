@@ -20,7 +20,7 @@ const enDict = en as Record<string, string>;
 const placeholders = (s: string) => [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join(',');
 const KHMER = /[ក-៿]/;
 // Strings that are legitimately not Khmer script in the Khmer dictionary.
-const KHMER_EXEMPT = new Set(['common.english']);
+const KHMER_EXEMPT = new Set(['common.english', 'portal.pager']);
 
 for (const key of Object.keys(kmDict)) {
   if (!(key in enDict)) problems.push(`missing in en: ${key}`);

@@ -10,17 +10,28 @@ Built and tested:
 
 - Database schema and migrations (organizations, branches, employees, roles and
   permissions, sessions, shifts, attendance, audit and security logs).
-- Telegram Mini App sign-in with server-side `initData` validation.
+- Telegram Mini App sign-in with server-side `initData` validation; portal sign-in from a
+  desktop browser with the Telegram Login Widget.
 - Employee enrollment with single-use, expiring codes.
 - PIN (Argon2id) with rate limiting, progressive lockout and HR-initiated reset.
 - Attendance validation engine: branch QR, IP allowlist, GPS geofence, shift rules,
   idempotency, duplicate and concurrency protection.
-- Employee screens: enrollment, PIN, home dashboard, QR scan and clock in/out.
+- Employee screens (`/`): enrollment, PIN, home dashboard, QR scan and clock in/out.
+- Admin and HR portal (`/admin`, `/hr`), with every action checked on the server against
+  the user's permissions and branch scope:
+  - Dashboard with live figures per branch.
+  - Employees: create, edit, branch assignment, status, enrollment codes, Telegram
+    unlink, PIN reset, role grants.
+  - Branches: profile, attendance rules, security settings, IP allowlist with a
+    "your IP" check, QR display, print, regenerate and revoke.
+  - Schedule: shift templates, bulk assignment with conflict detection, drafts and
+    publishing, overnight shifts.
+  - Attendance records, rejected attempts, and the audit log.
 - Khmer/English dictionaries with a completeness check that runs in every build.
 
-Not built yet: Admin and HR portal, schedule management screens, attendance history,
-employee requests and corrections, events/holidays/announcements, Telegram bot
-notifications and webhook, scheduled attendance processing, reports.
+Not built yet: attendance history for employees, requests and corrections (with
+adjustments), events/holidays/announcements, Telegram bot notifications and webhook,
+scheduled attendance processing, report export, employee import/export, file uploads.
 
 ## Setup
 
@@ -85,7 +96,8 @@ append-only (trigger-enforced).
 supabase/migrations/   SQL migrations
 scripts/               migrate, bootstrap, i18n check
 src/app/               pages and /api route handlers
-src/components/        Mini App screens
+src/components/        Mini App screens and portal screens
+src/lib/admin/         portal services: employees, branches, schedule, attendance review
 src/lib/attendance/    engine, IP allowlist, geofence, QR, home overview
 src/lib/auth/          sessions, enrollment, PIN, permissions, rate limiting
 src/lib/i18n/          Khmer (source) and English dictionaries, formatting
