@@ -103,8 +103,10 @@ async function main() {
     console.log('Organization, branch and administrator created.\n');
     console.log(`Enrollment code for ${need('admin-code')} (single use, expires ${expiresAt.toISOString()}):`);
     console.log(`  ${code}\n`);
+    const rawUrl = process.env.APP_URL?.trim();
+    const appUrl = !rawUrl ? 'https://example.invalid/' : /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
     console.log('Branch QR content (print this as a QR code and post it at the branch):');
-    console.log(`  ${qrPayload(process.env.APP_URL ?? 'https://example.invalid/', publicId)}`);
+    console.log(`  ${qrPayload(appUrl, publicId)}`);
     if (!cidrs.length) {
       console.log('\nNo --ip was given: clock-in will be refused until an allowed public IP is added for the branch.');
     }

@@ -9,6 +9,20 @@ import { can, branchScope, type Grant } from '@/lib/auth/permissions';
 import { applyDigits, dictionaries, formatDate, formatLongDate, formatTime, localDate, t } from '@/lib/i18n';
 import { ERROR_CODES } from '@/lib/errors';
 
+describe('environment', () => {
+  const base = { DATABASE_URL: 'postgres://x/y', TELEGRAM_BOT_TOKEN: 't', APP_SECRET: 'x'.repeat(32) };
+  it('treats blank optional settings as unset and accepts a bare domain for APP_URL', async () => {
+    const { parseEnv } = await import('@/lib/env');
+    const blank = parseEnv({ ...base, APP_URL: '', CRON_SECRET: '', TELEGRAM_WEBHOOK_SECRET: ' ' });
+    expect(blank.success && [blank.data.APP_URL, blank.data.CRON_SECRET, blank.data.TELEGRAM_WEBHOOK_SECRET]).toEqual([undefined, undefined, undefined]);
+    const bare = parseEnv({ ...base, APP_URL: 'attendance.example.com' });
+    expect(bare.success && bare.data.APP_URL).toBe('https://attendance.example.com');
+    expect(parseEnv({ ...base, APP_URL: 'https://attendance.example.com/' }).success).toBe(true);
+    expect(parseEnv({ ...base, APP_SECRET: 'short' }).success).toBe(false);
+    expect(parseEnv({ ...base, CRON_SECRET: 'tooshort' }).success).toBe(false);
+  });
+});
+
 describe('database connection settings', () => {
   it('encrypts anything that is not local, and verifies when a CA is given', async () => {
     const { connectionConfig } = await import('@/lib/db/connection');

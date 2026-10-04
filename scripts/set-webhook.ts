@@ -7,7 +7,8 @@ import './env';
 async function main() {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
-  const appUrl = process.env.APP_URL;
+  const rawUrl = process.env.APP_URL?.trim();
+  const appUrl = rawUrl && !/^https?:\/\//i.test(rawUrl) ? `https://${rawUrl}` : rawUrl;
   if (!token || !secret || !appUrl) throw new Error('TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET and APP_URL are required');
   const call = async (method: string, body: unknown) => {
     const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
