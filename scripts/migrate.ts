@@ -3,7 +3,6 @@
  * The same folder works with `supabase db push`; use one method consistently.
  * Usage: DATABASE_URL=... npm run db:migrate
  */
-import './_env';
 import './env';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';

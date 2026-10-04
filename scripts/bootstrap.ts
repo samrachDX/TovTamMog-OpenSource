@@ -9,7 +9,6 @@
  *     --lat 11.5564 --lon 104.9282 --ip 203.0.113.20 \
  *     --admin-code A001 --admin-km "ឈ្មោះ" --admin-en "Name"
  */
-import './_env';
 import './env';
 import { Client } from 'pg';
 import { connectionConfig } from '../src/lib/db/connection';
