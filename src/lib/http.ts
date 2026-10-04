@@ -114,7 +114,7 @@ export function queryInput(req: Request): Record<string, unknown> {
 export function flushOutbox(): void {
   after(async () => {
     try {
-      await deliverOutbox(db, telegramSender(env().TELEGRAM_BOT_TOKEN));
+      await deliverOutbox(db, telegramSender(env().TELEGRAM_BOT_TOKEN), { appUrl: env().APP_URL });
     } catch (err) {
       console.error('[telegram] outbox delivery failed', err instanceof Error ? err.message : err);
     }

@@ -19,6 +19,8 @@ export type Notice = {
   /** For kind 'event': the authored text, already in both languages. */
   text?: { titleKm: string; titleEn: string; bodyKm: string; bodyEn: string };
   data?: Record<string, unknown>;
+  /** Adds a button to the Telegram message that opens this path of the app, e.g. '/hr/requests'. */
+  link?: { path: string; label: MessageKey };
 };
 
 /** dd/mm/yyyy from a YYYY-MM-DD date string. */
@@ -67,14 +69,38 @@ export async function notify(db: Db, orgId: string, notices: Notice[], now: Date
       const title = km ? text.titleKm : text.titleEn || text.titleKm;
       const body = km ? text.bodyKm : text.bodyEn || text.bodyKm;
       await db.query(
-        `insert into telegram_outbox (employee_id, chat_id, text, created_at, next_attempt_at) values ($1, $2, $3, $4, $4)`,
-        [n.employeeId, person.chat_id, body ? `${title}\n\n${body}` : title, now],
+        `insert into telegram_outbox (employee_id, chat_id, text, link_path, link_label, created_at, next_attempt_at)
+         values ($1, $2, $3, $4, $5, $6, $6)`,
+        [
+          n.employeeId, person.chat_id, body ? `${title}\n\n${body}` : title,
+          n.link?.path ?? null, n.link ? t(km ? 'km-KH' : 'en', n.link.label) : null, now,
+        ],
       );
     }
   }
 }
 
-/** People configured to hear about activity at any of the given branches. */
+/**
+ * Everyone who could decide a request from an employee of these branches: active people
+ * holding every one of `permissions`, either for the whole organization or for one of
+ * the branches.
+ */
+export async function approvers(db: Db, orgId: string, branchIds: string[], permissions: string[], exclude: string[] = []): Promise<string[]> {
+  const rows = await db.query<{ employee_id: string }>(
+    `select e.id as employee_id
+     from employees e
+     where e.org_id = $1 and e.status = 'active' and not (e.id = any($4::uuid[]))
+       and (select count(distinct rp.permission_key)
+            from role_assignments ra join role_permissions rp on rp.role_key = ra.role_key
+            where ra.employee_id = e.id and ra.revoked_at is null and rp.permission_key = any($3::text[])
+              and (ra.branch_id is null or ra.branch_id = any($2::uuid[]))) = cardinality($3::text[])
+     order by e.employee_code`,
+    [orgId, branchIds, permissions, exclude],
+  );
+  return rows.map((r) => r.employee_id);
+}
+
+/** Extra people a branch has chosen to hear about its activity, on top of the approvers. */
 export async function branchRecipients(db: Db, branchIds: string[], exclude: string[] = []): Promise<string[]> {
   if (!branchIds.length) return [];
   const rows = await db.query<{ employee_id: string }>(

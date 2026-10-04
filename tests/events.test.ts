@@ -138,12 +138,29 @@ describe('workflow notifications', () => {
     const before = (await outbox()).length;
     const { id } = await createRequest(db, { employeeId: f.employeeId, orgId: f.orgId, now }, { type: 'leave', reason: 'ធ្វើបុណ្យ', startDate: '2026-10-20' });
     let sent = (await outbox()).slice(before);
-    // Only the manager: the requester is a recipient too but is not told about their own request.
-    expect(sent.map((m) => m.chat_id)).toEqual(['9003']);
+    // Everyone who can decide it is alerted: the org admin (9002) and the branch manager (9003).
+    // HR can decide too but has no Telegram, so gets the inbox entry only. The requester is a
+    // chosen recipient but is never told about their own request.
+    expect(sent.map((m) => m.chat_id).sort()).toEqual(['9002', '9003']);
     expect(sent[0].text).toBe('សំណើថ្មីពី សុខា\n\nសំណើសុំច្បាប់។ សូមពិនិត្យក្នុងផ្ទាំងគ្រប់គ្រង។');
+    expect((await inbox(hr.employeeId))[0].kind).toBe('request_submitted');
+    expect((await inbox(f.employeeId)).every((n) => n.kind !== 'request_submitted')).toBe(true);
+    // Someone who manages a different branch is not an approver here.
+    const other = await actorWith('BM9', 'branch_manager', f.otherBranchId, 9010);
+    await createRequest(db, { employeeId: f.employeeId, orgId: f.orgId, now }, { type: 'absence', reason: 'ឈឺធ្មេញ', startDate: TODAY });
+    expect((await inbox(other.employeeId)).length).toBe(0);
+    // The message carries a button that opens the review page inside Telegram.
+    const seen: { chat: string; url?: string; label?: string }[] = [];
+    await deliverOutbox(db, async (chat, _text, markup) => {
+      seen.push({ chat, url: markup?.inline_keyboard[0][0].web_app?.url, label: markup?.inline_keyboard[0][0].text });
+      return { ok: true };
+    }, { now, appUrl: 'https://ttm.example' });
+    expect(seen.filter((x) => x.url).every((x) => x.url === 'https://ttm.example/hr/requests' && x.label === 'ពិនិត្យសំណើ')).toBe(true);
+    expect(seen.some((x) => x.url)).toBe(true);
+    sent = (await outbox()).slice(before);
 
     await decideRequest(db, manager, id, { decision: 'rejected', note: 'ខ្វះបុគ្គលិក' });
-    sent = (await outbox()).slice(before + 1);
+    sent = (await outbox()).slice(sent.length + before);
     expect(sent).toMatchObject([{ chat_id: '9001', text: 'សំណើរបស់អ្នកត្រូវបានបដិសេធ\n\nសំណើសុំច្បាប់\nមូលហេតុ៖ ខ្វះបុគ្គលិក' }]);
   });
 
@@ -199,7 +216,8 @@ describe('Telegram delivery', () => {
 
     const ok: Sender = async () => ({ ok: true });
     const later = new Date(now.getTime() + 3_600_000);
-    expect((await deliverOutbox(db, ok, { now: later })).sent).toBe(1);
+    // The retried message, plus the alert to the admin about the request made just above.
+    expect((await deliverOutbox(db, ok, { now: later })).sent).toBe(2);
     // A 403 that is not Telegram's "blocked" answer (a proxy, say) is retried and blocks nobody.
     await q(9001, 'proxied');
     const proxy: Sender = async () => ({ ok: false, status: 403, description: 'Forbidden' });

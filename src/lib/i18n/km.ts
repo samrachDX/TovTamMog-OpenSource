@@ -458,8 +458,11 @@ export const km = {
   'notifications.unread': 'មិនទាន់អាន',
   'notifications.unreadCount': 'ការជូនដំណឹងមិនទាន់អាន {count}',
   'notifications.viaTelegram': 'ទទួលការជូនដំណឹងតាមសារ Telegram ផងដែរ',
-  'portal.branch.recipients': 'អ្នកទទួលការជូនដំណឹងរបស់សាខា',
-  'portal.branch.recipientsNote': 'អ្នកដែលបានជ្រើសរើសនឹងទទួលដំណឹង នៅពេលបុគ្គលិកសាខានេះដាក់សំណើថ្មី។',
+  'portal.branch.recipients': 'អ្នកទទួលការជូនដំណឹងបន្ថែម',
+  'portal.branch.recipientsNote': 'អ្នកដែលមានសិទ្ធិអនុម័តទទួលបានដំណឹងដោយស្វ័យប្រវត្តិ នៅពេលបុគ្គលិកដាក់សំណើថ្មី។ អ្នកអាចជ្រើសរើសអ្នកផ្សេងទៀតបន្ថែមនៅទីនេះ។',
+
+  // ---- Bot buttons ----
+  'bot.review': 'ពិនិត្យសំណើ',
 } as const;
 
 export type MessageKey = keyof typeof km;

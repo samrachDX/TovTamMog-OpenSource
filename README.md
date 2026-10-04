@@ -40,7 +40,8 @@ Built and tested:
   per person, an optional celebration animation, and non-working holidays that suppress
   absences. The employee home shows upcoming events and current announcements.
 - Notifications: an in-app inbox with unread badge, plus Telegram messages for request
-  decisions, new requests (to each branch's chosen recipients), published schedules,
+  decisions, new requests (to everyone who can approve them, with a button that opens
+  the review page, plus anyone a branch adds), published schedules,
   missed clock-outs, recorded absences, PIN resets and published events. Messages use
   each person's language; anyone can switch Telegram messages off.
 - Telegram bot: verified webhook (`/api/internal/telegram-webhook`) answering /start

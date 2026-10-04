@@ -1,7 +1,7 @@
 import type { Db } from '@/lib/db/types';
 import { AppError } from '@/lib/errors';
 import { recordAudit } from '@/lib/audit';
-import { branchRecipients, notify } from '@/lib/notifications';
+import { approvers, branchRecipients, notify } from '@/lib/notifications';
 import { t, type MessageKey } from '@/lib/i18n';
 import { can } from '@/lib/auth/permissions';
 import { earlyLeaveMinutes, lateMinutes } from '@/lib/attendance/engine';
@@ -83,6 +83,7 @@ export async function createRequest(db: Db, who: { employeeId: string; orgId: st
     let proposedIn: Date | null = null;
     let proposedOut: Date | null = null;
     let previousStatus: string | null = null;
+    let recordBranchId: string | null = null;
 
     if (type === 'leave' || type === 'absence') {
       startDate = date(input, 'startDate');
@@ -94,6 +95,7 @@ export async function createRequest(db: Db, who: { employeeId: string; orgId: st
       const rec = await lockRecord(tx, recordId);
       // Someone else's record is indistinguishable from one that does not exist.
       if (!rec || rec.employee_id !== who.employeeId) throw new AppError('NOT_FOUND');
+      recordBranchId = rec.branch_id;
 
       if (type === 'late') {
         if (rec.late_minutes <= 0) throw new AppError('RECORD_NOT_CORRECTABLE');
@@ -132,12 +134,17 @@ export async function createRequest(db: Db, who: { employeeId: string; orgId: st
       id, who.employeeId, why, now,
     ]);
 
-    // Tell the people configured for this employee's branches (never the requester).
-    const branches = await tx.query<{ branch_id: string }>(`select branch_id from employee_branches where employee_id = $1`, [who.employeeId]);
+    // Alert everyone who can decide this request, plus anyone the branch added, never the requester.
+    // A correction is decided at the record's branch and needs attendance.approve as well.
+    const branches = (await tx.query<{ branch_id: string }>(`select branch_id from employee_branches where employee_id = $1`, [who.employeeId])).map((b) => b.branch_id);
+    const changesRecord = type === 'missed_clock_out' || type === 'correction';
+    const scope = changesRecord && recordBranchId ? [recordBranchId] : branches;
+    const canDecide = await approvers(tx, who.orgId, scope, changesRecord ? ['request.review', 'attendance.approve'] : ['request.review'], [who.employeeId]);
+    const extra = await branchRecipients(tx, branches, [who.employeeId]);
     const me = await tx.query<{ name_km: string; name_en: string | null }>(`select name_km, name_en from employees where id = $1`, [who.employeeId]);
-    const recipients = await branchRecipients(tx, branches.map((b) => b.branch_id), [who.employeeId]);
-    await notify(tx, who.orgId, recipients.map((employeeId) => ({
+    await notify(tx, who.orgId, [...new Set([...canDecide, ...extra])].map((employeeId) => ({
       employeeId, kind: 'request_submitted' as const, data: { requestId: id },
+      link: { path: '/hr/requests', label: 'bot.review' as const },
       params: (locale) => ({
         name: locale === 'km-KH' ? me[0].name_km : me[0].name_en || me[0].name_km,
         type: t(locale, `requests.type.${type}` as MessageKey),

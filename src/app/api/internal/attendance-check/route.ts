@@ -19,7 +19,7 @@ export async function GET(req: Request) {
   try {
     const maintenance = await runAttendanceMaintenance(db);
     // Also sends anything still queued, including the notices the step above just created.
-    const telegram = await deliverOutbox(db, telegramSender(env().TELEGRAM_BOT_TOKEN), { limit: 200 });
+    const telegram = await deliverOutbox(db, telegramSender(env().TELEGRAM_BOT_TOKEN), { limit: 200, appUrl: env().APP_URL });
     return Response.json({ ok: true, ...maintenance, telegram }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err) {
     console.error('[cron] attendance-check failed', err);

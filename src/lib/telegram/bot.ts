@@ -36,23 +36,28 @@ const MAX_ATTEMPTS = 5;
 export async function deliverOutbox(
   db: Db,
   send: Sender,
-  opts: { limit?: number; now?: Date } = {},
+  opts: { limit?: number; now?: Date; appUrl?: string } = {},
 ): Promise<{ sent: number; failed: number; retried: number }> {
   const now = opts.now ?? new Date();
-  const claimed = await db.query<{ id: string; employee_id: string | null; chat_id: string; text: string; attempts: number; seq: string }>(
+  const claimed = await db.query<{ id: string; employee_id: string | null; chat_id: string; text: string; attempts: number; seq: string; link_path: string | null; link_label: string | null }>(
     `update telegram_outbox set status = 'sending', attempts = attempts + 1, claimed_at = $1
      where id in (
        select id from telegram_outbox
        where (status = 'pending' and next_attempt_at <= $1)
           or (status = 'sending' and claimed_at < $1::timestamptz - interval '5 minutes')
        order by seq limit $2 for update skip locked)
-     returning id, employee_id, chat_id::text as chat_id, text, attempts, seq`,
+     returning id, employee_id, chat_id::text as chat_id, text, attempts, seq, link_path, link_label`,
     [now, opts.limit ?? 25],
   );
   claimed.sort((a, b) => Number(a.seq) - Number(b.seq));
   const result = { sent: 0, failed: 0, retried: 0 };
   for (const m of claimed) {
-    const r = await send(m.chat_id, m.text);
+    // The button opens the page inside Telegram, where the app signs the person in.
+    const markup: ReplyMarkup | undefined =
+      opts.appUrl && m.link_path && m.link_label
+        ? { inline_keyboard: [[{ text: m.link_label, web_app: { url: new URL(m.link_path, opts.appUrl).toString() } }]] }
+        : undefined;
+    const r = await send(m.chat_id, m.text, markup);
     if (r.ok) {
       await db.query(`update telegram_outbox set status = 'sent', sent_at = $2, last_error = null where id = $1`, [m.id, now]);
       result.sent += 1;

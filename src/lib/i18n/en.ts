@@ -459,6 +459,9 @@ export const en: Record<MessageKey, string> = {
   'notifications.unread': 'Unread',
   'notifications.unreadCount': '{count} unread notifications',
   'notifications.viaTelegram': 'Also send my notifications as Telegram messages',
-  'portal.branch.recipients': 'Branch notification recipients',
-  'portal.branch.recipientsNote': 'The people selected are told when staff of this branch submit a new request.',
+  'portal.branch.recipients': 'Additional notification recipients',
+  'portal.branch.recipientsNote': 'People who can approve are alerted automatically when staff submit a new request. Tick anyone else who should also be told.',
+
+  // ---- Bot buttons ----
+  'bot.review': 'Review request',
 };
