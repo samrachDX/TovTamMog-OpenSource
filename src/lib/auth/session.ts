@@ -73,6 +73,16 @@ export function authenticateLoginWidget(
   );
 }
 
+/** Rate-limit key for an address. One IPv6 subscriber owns a whole /64, so that is the unit. */
+export function ipBucket(ip: string): string {
+  if (!ip.includes(':')) return ip;
+  const [head, tail = ''] = ip.toLowerCase().split('::');
+  const left = head ? head.split(':') : [];
+  const right = tail ? tail.split(':') : [];
+  const groups = ip.includes('::') ? [...left, ...Array(Math.max(0, 8 - left.length - right.length)).fill('0'), ...right] : left;
+  return `${groups.slice(0, 4).map((g) => g.replace(/^0+(?=.)/, '')).join(':')}::/64`;
+}
+
 async function authenticate(
   db: Db,
   cfg: AuthConfig,
@@ -81,7 +91,7 @@ async function authenticate(
 ): Promise<AuthResult> {
   const now = meta.now ?? new Date();
   if (meta.ip) {
-    const rl = await hitRateLimit(db, `auth:ip:${meta.ip}`, 60, 60, now);
+    const rl = await hitRateLimit(db, `auth:ip:${ipBucket(meta.ip)}`, 60, 60, now);
     if (!rl.allowed) throw new AppError('RATE_LIMITED');
   }
   let verified;
@@ -179,7 +189,7 @@ export async function enrollWithCode(
   });
 
   const limits = [hitRateLimit(db, `enroll:tg:${tg.id}`, 5, 900, now)];
-  if (meta.ip) limits.push(hitRateLimit(db, `enroll:ip:${meta.ip}`, 20, 900, now));
+  if (meta.ip) limits.push(hitRateLimit(db, `enroll:ip:${ipBucket(meta.ip)}`, 20, 900, now));
   if ((await Promise.all(limits)).some((r) => !r.allowed)) {
     await recordSecurityEvent(db, {
       telegramUserId: tg.id,

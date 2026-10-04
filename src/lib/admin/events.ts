@@ -1,7 +1,7 @@
 import type { Db } from '@/lib/db/types';
 import { AppError } from '@/lib/errors';
 import { recordAudit } from '@/lib/audit';
-import { can } from '@/lib/auth/permissions';
+import { branchScope, can } from '@/lib/auth/permissions';
 import { dmy, notify, type Notice } from '@/lib/notifications';
 import { bool, date, oneOf, optText, optUuid, paging, requireCan, scopeOf, text, uuidList, type Actor } from './actor';
 
@@ -188,6 +188,12 @@ export async function archiveEvent(db: Db, actor: Actor, id: string): Promise<vo
   });
 }
 
+/** Branches the actor can see on the dashboard, or null for all of them. */
+function branchScopeOrNull(actor: Actor): string[] | null {
+  const scope = branchScope(actor.grants, 'attendance.view');
+  return scope === 'all' ? null : scope;
+}
+
 /** Upcoming published events for the portal dashboard, within the actor's view. */
 export async function upcomingEvents(db: Db, actor: Actor, today: string) {
   return db.query(
@@ -195,7 +201,10 @@ export async function upcomingEvents(db: Db, actor: Actor, today: string) {
      from events ev
      where ev.org_id = $1 and ev.status = 'published' and ev.type <> 'announcement' and ev.ends_on >= $2::date
        and ev.starts_on <= $2::date + 60
+       and ($3::uuid[] is null
+         or not exists (select 1 from event_branches eb where eb.event_id = ev.id)
+         or exists (select 1 from event_branches eb where eb.event_id = ev.id and eb.branch_id = any($3::uuid[])))
      order by ev.starts_on limit 8`,
-    [actor.orgId, today],
+    [actor.orgId, today, branchScopeOrNull(actor)],
   );
 }

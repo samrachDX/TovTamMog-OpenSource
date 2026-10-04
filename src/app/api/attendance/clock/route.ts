@@ -51,7 +51,7 @@ export function POST(req: Request) {
           ok: false,
           branch: result.branch && { nameKm: result.branch.nameKm, nameEn: result.branch.nameEn },
           // Short reference staff can quote to HR; maps to the logged attempt.
-          reference: result.attemptId.slice(0, 8),
+          reference: result.attemptId?.slice(0, 8),
           failures: result.failures.map((code) => ({ code, message: t(locale, errorMessageKey(code)) })),
         },
         422,

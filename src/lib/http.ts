@@ -58,9 +58,38 @@ export function errorBody(locale: Locale, code: ErrorCode, params?: Record<strin
   return { error: { code, message: t(locale, errorMessageKey(code), params) } };
 }
 
+/**
+ * Reads a request body without ever holding more than `maxBytes` of it: a declared
+ * length over the cap is refused outright, and a chunked body is cut off at the cap.
+ */
+export async function readBody(req: Request, maxBytes: number, tooLarge: () => AppError): Promise<Uint8Array> {
+  const declared = Number(req.headers.get('content-length') ?? 0);
+  if (declared > maxBytes) throw tooLarge();
+  if (!req.body) return new Uint8Array();
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > maxBytes) {
+      await reader.cancel().catch(() => {});
+      throw tooLarge();
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(size);
+  let at = 0;
+  for (const c of chunks) {
+    out.set(c, at);
+    at += c.byteLength;
+  }
+  return out;
+}
+
 export async function readJson(req: Request): Promise<Record<string, unknown>> {
-  const text = await req.text();
-  if (text.length > 16_384) throw new AppError('BAD_REQUEST');
+  const text = new TextDecoder().decode(await readBody(req, 16_384, () => new AppError('BAD_REQUEST')));
   try {
     const body: unknown = JSON.parse(text);
     if (body && typeof body === 'object' && !Array.isArray(body)) return body as Record<string, unknown>;

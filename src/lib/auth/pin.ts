@@ -64,6 +64,13 @@ type Ctx = { sessionId: string; ip?: string | null; now?: Date };
 export async function setInitialPin(db: Db, employeeId: string, pin: unknown, ctx: Ctx): Promise<void> {
   assertPinAcceptable(pin);
   const now = ctx.now ?? new Date();
+  // Hashing is deliberately expensive, so refuse cheaply first.
+  const state = await db.query<{ pin_hash: string | null; pin_reset_required: boolean }>(
+    `select pin_hash, pin_reset_required from employees where id = $1`, [employeeId],
+  );
+  if (state[0]?.pin_hash && !state[0].pin_reset_required) throw new AppError('PIN_ALREADY_SET');
+  const rl = await hitRateLimit(db, `pinsetup:${employeeId}`, 5, 900, now);
+  if (!rl.allowed) throw new AppError('RATE_LIMITED');
   const pinHash = await hashPin(pin);
   await db.tx(async (tx) => {
     const emp = await lockEmployee(tx, employeeId);

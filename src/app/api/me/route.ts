@@ -1,5 +1,5 @@
 import { db } from '@/lib/db';
-import { sessionState } from '@/lib/auth/session';
+import { requirePin, sessionState } from '@/lib/auth/session';
 import { getTodayOverview } from '@/lib/attendance/overview';
 import { getFeed } from '@/lib/feed';
 import { localDate } from '@/lib/i18n';
@@ -25,6 +25,8 @@ export function PATCH(req: Request) {
   return handle(req, async () => {
     const session = await sessionFrom(req);
     const body = await readJson(req);
+    // Language and digits are harmless before the PIN; switching alerts off is not.
+    if (body.notifyTelegram !== undefined) requirePin(session);
     await updatePreferences(db, session.employeeId, { locale: body.locale, digits: body.digits, notifyTelegram: body.notifyTelegram });
     return json({ ok: true });
   });

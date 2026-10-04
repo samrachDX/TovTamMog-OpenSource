@@ -54,7 +54,7 @@ export async function deliverOutbox(
   for (const m of claimed) {
     // The button opens the page inside Telegram, where the app signs the person in.
     const markup: ReplyMarkup | undefined =
-      opts.appUrl && m.link_path && m.link_label
+      opts.appUrl && m.link_path && m.link_label && /^\/(?!\/)/.test(m.link_path)
         ? { inline_keyboard: [[{ text: m.link_label, web_app: { url: new URL(m.link_path, opts.appUrl).toString() } }]] }
         : undefined;
     const r = await send(m.chat_id, m.text, markup);

@@ -35,6 +35,15 @@ export function setToken(token: string | null): void {
   }
 }
 
+/** Signs out here and on the server. The local token goes even if the server cannot be reached. */
+export function signOut(): void {
+  const token = getToken();
+  setToken(null);
+  if (token) {
+    void fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, keepalive: true }).catch(() => {});
+  }
+}
+
 export async function api<T>(
   path: string,
   opts: { method?: string; body?: unknown; locale: Locale; auth?: boolean },

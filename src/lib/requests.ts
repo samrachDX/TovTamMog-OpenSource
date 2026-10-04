@@ -4,6 +4,7 @@ import { recordAudit } from '@/lib/audit';
 import { approvers, branchRecipients, notify } from '@/lib/notifications';
 import { t, type MessageKey } from '@/lib/i18n';
 import { can } from '@/lib/auth/permissions';
+import { hitRateLimit } from '@/lib/auth/rate-limit';
 import { expectedHours, recomputeLateness } from '@/lib/attendance/leave';
 import { earlyLeaveMinutes, lateMinutes } from '@/lib/attendance/timing';
 import { DATE, TIME, date, oneOf, optText, optUuid, paging, requireCan, scopeOf, text, time, uuid, type Actor } from '@/lib/admin/actor';
@@ -76,6 +77,11 @@ export async function createRequest(db: Db, who: { employeeId: string; orgId: st
   const type = oneOf(input, 'type', REQUEST_TYPES);
   const why = text(input, 'reason', { min: 3, max: 1000 });
   const now = who.now ?? new Date();
+  // Every request messages the approvers, so one account cannot be used to flood them.
+  for (const [window, limit] of [[3600, 10], [86_400, 30]] as const) {
+    const rl = await hitRateLimit(db, `req:${window}:${who.employeeId}`, limit, window, now);
+    if (!rl.allowed) throw new AppError('RATE_LIMITED');
+  }
 
   return db.tx(async (tx) => {
     let startDate: string | null = null;
@@ -314,11 +320,15 @@ export async function getRecordHistory(db: Db, actor: Actor, recordId: string) {
   const rows = await db.query<{ branch_id: string; org_id: string }>(`select branch_id, org_id from attendance_records where id = $1`, [recordId]);
   if (!rows[0] || rows[0].org_id !== actor.orgId) throw new AppError('NOT_FOUND');
   requireCan(actor, 'attendance.view', rows[0].branch_id);
+  // Where and from which network someone clocked is evidence, shown only to those who may see attempts.
+  const evidence = can(actor.grants, 'attendance.attempts.view', rows[0].branch_id);
   const [events, adjustments] = await Promise.all([
     db.query(
-      `select action, occurred_at as "occurredAt", source_ip as "sourceIp", distance_m as "distanceM", accuracy_m as "accuracyM"
+      `select action, occurred_at as "occurredAt",
+              case when $2 then source_ip end as "sourceIp", case when $2 then distance_m end as "distanceM",
+              case when $2 then accuracy_m end as "accuracyM"
        from attendance_events where record_id = $1 order by occurred_at`,
-      [recordId],
+      [recordId, evidence],
     ),
     db.query(
       `select a.id, a.created_at as "createdAt", a.reason, a.original, a.updated, a.request_id as "requestId",
@@ -367,12 +377,16 @@ export async function countPendingRequests(db: Db, actor: Actor): Promise<number
   return n;
 }
 
-export async function getRequestEvents(db: Db, actor: Actor | { employeeId: string }, requestId: string) {
+export async function getRequestEvents(db: Db, actor: Actor, requestId: string) {
+  const scope = scopeOf(actor, 'request.review');
   return db.query(
     `select ev.action, ev.note, ev.created_at as "createdAt", e.name_km as "actorKm", e.name_en as "actorEn"
-     from request_events ev left join employees e on e.id = ev.actor_employee_id
-     where ev.request_id = $1 order by ev.created_at`,
-    [requestId],
+     from request_events ev join employee_requests q on q.id = ev.request_id
+     left join employees e on e.id = ev.actor_employee_id
+     where ev.request_id = $1 and q.org_id = $2
+       and ($3::uuid[] is null or exists (select 1 from employee_branches s where s.employee_id = q.employee_id and s.branch_id = any($3::uuid[])))
+     order by ev.created_at`,
+    [requestId, actor.orgId, scope],
   );
 }
 

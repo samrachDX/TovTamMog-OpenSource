@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ApiError, api, getToken, setToken } from '@/lib/client/api';
+import { ApiError, api, getToken, setToken, signOut } from '@/lib/client/api';
 import { telegram } from '@/lib/client/telegram';
 import type { Digits, Locale, MessageKey } from '@/lib/i18n';
 import { Brand } from '@/components/Brand';
@@ -153,7 +153,7 @@ function Gate({ children }: { children: ReactNode }) {
     </div>
   );
 
-  if (phase.name === 'ready') return <Frame me={phase.me} onSignOut={() => { setToken(null); void start(); }}>{children}</Frame>;
+  if (phase.name === 'ready') return <Frame me={phase.me} onSignOut={() => { signOut(); void start(); }}>{children}</Frame>;
 
   if (phase.name === 'boot') {
     return (

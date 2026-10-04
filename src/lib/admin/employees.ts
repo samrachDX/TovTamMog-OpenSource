@@ -3,6 +3,7 @@ import { AppError } from '@/lib/errors';
 import { recordAudit } from '@/lib/audit';
 import { initiatePinReset } from '@/lib/auth/pin';
 import { createEnrollmentCode } from '@/lib/auth/session';
+import { can, type Permission } from '@/lib/auth/permissions';
 import {
   isUniqueViolation, oneOf, optText, optUuid, paging, reason, requireCan, scopeOf, text, uuidList,
   type Actor,
@@ -250,6 +251,24 @@ export async function updateEmployee(db: Db, actor: Actor, id: string, input: In
   });
 }
 
+/**
+ * Account-level actions (suspend, unlink, new enrollment code, PIN reset) hand over or
+ * take away someone's sign-in. They are allowed only on people ranked below the actor,
+ * so a manager cannot seize or lock out an administrator. Super admins are exempt.
+ */
+async function assertOutranks(db: Db, actor: Actor, targetId: string): Promise<void> {
+  const rows = await db.query<{ id: string; rank: number | null }>(
+    `select ra.employee_id as id, max(r.rank)::int as rank
+     from role_assignments ra join roles r on r.key = ra.role_key
+     where ra.employee_id = any($1::uuid[]) and ra.revoked_at is null group by ra.employee_id`,
+    [[actor.employeeId, targetId]],
+  );
+  const rank = (id: string) => rows.find((r) => r.id === id)?.rank ?? 0;
+  const mine = rank(actor.employeeId);
+  if (mine >= 100) return;
+  if (targetId === actor.employeeId || rank(targetId) >= mine) throw new AppError('FORBIDDEN');
+}
+
 /** Activate, suspend or deactivate. Anything other than active ends the person's sessions. */
 export async function setEmployeeStatus(db: Db, actor: Actor, id: string, input: Input): Promise<void> {
   const status = oneOf(input, 'status', ['active', 'suspended', 'inactive'] as const);
@@ -258,6 +277,7 @@ export async function setEmployeeStatus(db: Db, actor: Actor, id: string, input:
   const now = actor.now ?? new Date();
   await db.tx(async (tx) => {
     const before = await loadScoped(tx, actor, id, 'employee.update', true);
+    await assertOutranks(tx, actor, id);
     if (before.status === status) return;
     await tx.query(`update employees set status = $2, updated_at = $3 where id = $1`, [id, status, now]);
     if (status !== 'active') {
@@ -272,6 +292,7 @@ export async function setEmployeeStatus(db: Db, actor: Actor, id: string, input:
 
 export async function issueEnrollmentCode(db: Db, actor: Actor, appSecret: string, id: string) {
   await loadScoped(db, actor, id, 'employee.enroll');
+  await assertOutranks(db, actor, id);
   return createEnrollmentCode(db, { appSecret }, {
     employeeId: id, actorEmployeeId: actor.employeeId, ttlHours: 24, ip: actor.ip, now: actor.now,
   });
@@ -284,6 +305,7 @@ export async function unlinkTelegram(db: Db, actor: Actor, id: string, input: In
   const now = actor.now ?? new Date();
   await db.tx(async (tx) => {
     const before = await loadScoped(tx, actor, id, 'employee.enroll', true);
+    await assertOutranks(tx, actor, id);
     if (!before.telegram_linked) throw new AppError('TELEGRAM_NOT_LINKED');
     await tx.query(
       `update employees set telegram_user_id = null, telegram_username = null, telegram_linked_at = null, updated_at = $2
@@ -301,6 +323,7 @@ export async function unlinkTelegram(db: Db, actor: Actor, id: string, input: In
 export async function resetEmployeePin(db: Db, actor: Actor, id: string, input: Input): Promise<void> {
   const why = reason(input);
   await loadScoped(db, actor, id, 'employee.pin_reset');
+  await assertOutranks(db, actor, id);
   await initiatePinReset(db, { employeeId: id, actorEmployeeId: actor.employeeId, reason: why, ip: actor.ip, now: actor.now });
 }
 
@@ -327,7 +350,7 @@ export async function actorRank(db: Db, actor: Actor): Promise<number> {
  * Nobody changes their own roles, and nobody hands out or removes a role at or above
  * their own level. Only a super admin can create another super admin.
  */
-async function assertGrantable(db: Db, actor: Actor, targetId: string, roleKey: string) {
+async function assertGrantable(db: Db, actor: Actor, targetId: string, roleKey: string, grantBranchId?: string | null) {
   requireCan(actor, 'role.assign');
   if (targetId === actor.employeeId) throw new AppError('CANNOT_MODIFY_SELF');
   // Built-in roles, or this organization's own. Another organization's role does not exist here.
@@ -336,6 +359,16 @@ async function assertGrantable(db: Db, actor: Actor, targetId: string, roleKey: 
   const mine = await actorRank(db, actor);
   const allowed = roleKey === 'super_admin' ? mine >= 100 : role[0].rank < mine;
   if (!allowed) throw new AppError('ROLE_NOT_GRANTABLE');
+  // Rank is only a number someone typed in. When granting, the actor must also hold every
+  // permission the role carries, for the same scope, so nobody hands out more than they have.
+  if (grantBranchId !== undefined) {
+    const perms = await db.query<{ permission_key: Permission }>(
+      `select permission_key from role_permissions where role_key = $1`, [roleKey],
+    );
+    for (const p of perms) {
+      if (!can(actor.grants, p.permission_key, grantBranchId)) throw new AppError('ROLE_NOT_GRANTABLE');
+    }
+  }
 }
 
 export async function grantRole(db: Db, actor: Actor, id: string, input: Input): Promise<void> {
@@ -343,7 +376,7 @@ export async function grantRole(db: Db, actor: Actor, id: string, input: Input):
   const branchId = optUuid(input, 'branchId');
   const why = reason(input);
   await db.tx(async (tx) => {
-    await assertGrantable(tx, actor, id, roleKey);
+    await assertGrantable(tx, actor, id, roleKey, branchId);
     await loadScoped(tx, actor, id, 'employee.view', true);
     if (branchId) {
       const b = await tx.query(`select 1 from branches where id = $1 and org_id = $2`, [branchId, actor.orgId]);

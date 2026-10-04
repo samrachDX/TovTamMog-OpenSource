@@ -43,7 +43,9 @@ export function parseEnv(source: Record<string, string | undefined>) {
 
 export function env(): Env {
   if (!cached) {
-    const parsed = schema.safeParse(process.env);
+    // On Vercel the trusted header is known, so forgetting the setting cannot switch off IP checks and limits.
+    const source = !process.env.TRUSTED_PROXY?.trim() && process.env.VERCEL ? { ...process.env, TRUSTED_PROXY: 'vercel' } : process.env;
+    const parsed = schema.safeParse(source);
     if (!parsed.success) {
       const issues = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
       throw new Error(`Invalid environment configuration: ${issues}`);

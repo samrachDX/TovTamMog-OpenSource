@@ -49,7 +49,7 @@ export type BranchSummary = { id: string; nameKm: string; nameEn: string; timezo
 
 export type ClockResult =
   | { ok: true; replayed: boolean; action: ClockAction; record: AttendanceRecord; branch: BranchSummary }
-  | { ok: false; failures: ErrorCode[]; attemptId: string; branch: BranchSummary | null };
+  | { ok: false; failures: ErrorCode[]; attemptId: string | null; branch: BranchSummary | null };
 
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9_-]{16,64}$/;
 const CLOCK_ATTEMPTS_PER_MINUTE = 12;
@@ -209,7 +209,11 @@ export async function clock(db: Db, input: ClockInput): Promise<ClockResult> {
     }
 
     const rl = await hitRateLimit(tx, `clock:${emp.id}`, CLOCK_ATTEMPTS_PER_MINUTE, 60, now);
-    if (!rl.allowed) return reject(['RATE_LIMITED']);
+    if (!rl.allowed) {
+      // Record the first refusal only; a script hammering the endpoint must not fill the logs.
+      if (rl.count === CLOCK_ATTEMPTS_PER_MINUTE + 1) return reject(['RATE_LIMITED']);
+      return { ok: false, failures: ['RATE_LIMITED'], attemptId: null, branch: summary() };
+    }
 
     const failures: ErrorCode[] = [];
     if (emp.status !== 'active') failures.push('EMPLOYEE_INACTIVE');

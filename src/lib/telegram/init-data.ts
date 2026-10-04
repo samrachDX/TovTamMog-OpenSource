@@ -75,7 +75,8 @@ export function verifyInitData(
   const u = user as Record<string, unknown>;
   // Read the id from the raw JSON text so large integers are not rounded.
   const idMatch = /"id"\s*:\s*(\d{1,20})/.exec(params.get('user') ?? '');
-  if (!u || typeof u !== 'object' || !idMatch || u.is_bot === true) {
+  // The text match must be the same field the parser saw, not an "id" nested somewhere else.
+  if (!u || typeof u !== 'object' || !idMatch || typeof u.id !== 'number' || Number(idMatch[1]) !== u.id || u.is_bot === true) {
     throw new AppError('TELEGRAM_INIT_DATA_INVALID');
   }
   const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined);

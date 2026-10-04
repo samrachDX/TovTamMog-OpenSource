@@ -1,8 +1,8 @@
 import { db } from '@/lib/db';
 import { AppError } from '@/lib/errors';
-import { UUID } from '@/lib/admin/actor';
+import { UUID, scopeOf } from '@/lib/admin/actor';
 import { FILE_KINDS, deleteEmployeeFile, getEmployeeFile, saveEmployeeFile, type FileKind } from '@/lib/admin/files';
-import { handle, json, portalActor } from '@/lib/http';
+import { handle, json, portalActor, readBody } from '@/lib/http';
 
 type Ctx = { params: Promise<{ id: string; kind: string }> };
 
@@ -33,8 +33,10 @@ export function PUT(req: Request, ctx: Ctx) {
   return handle(req, async () => {
     const { id, kind } = await target(ctx);
     const actor = await portalActor(req);
-    if (Number(req.headers.get('content-length') ?? 0) > 4_000_000) throw new AppError('FILE_TOO_LARGE', { mb: '3.0' });
-    await saveEmployeeFile(db, actor, id, kind, new Uint8Array(await req.arrayBuffer()));
+    // Refuse before reading the body when the caller cannot edit anyone at all.
+    scopeOf(actor, 'employee.update');
+    const bytes = await readBody(req, 4_000_000, () => new AppError('FILE_TOO_LARGE', { mb: '3.0' }));
+    await saveEmployeeFile(db, actor, id, kind, bytes);
     return json({ ok: true });
   });
 }
