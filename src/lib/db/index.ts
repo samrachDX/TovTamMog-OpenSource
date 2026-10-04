@@ -1,6 +1,7 @@
 import 'server-only';
 import { Pool, type PoolClient } from 'pg';
 import { env } from '@/lib/env';
+import { connectionConfig } from './connection';
 import type { Db, Row } from './types';
 
 export type { Db, Row } from './types';
@@ -10,7 +11,7 @@ const globalForDb = globalThis as unknown as { __ttmPool?: Pool };
 function pool(): Pool {
   if (!globalForDb.__ttmPool) {
     globalForDb.__ttmPool = new Pool({
-      connectionString: env().DATABASE_URL,
+      ...connectionConfig(env().DATABASE_URL),
       // Serverless: keep the per-instance pool small and use the Supabase pooler URL.
       max: 3,
       idleTimeoutMillis: 10_000,

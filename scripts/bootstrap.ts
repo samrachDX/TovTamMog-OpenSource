@@ -9,8 +9,10 @@
  *     --lat 11.5564 --lon 104.9282 --ip 203.0.113.20 \
  *     --admin-code A001 --admin-km "ឈ្មោះ" --admin-en "Name"
  */
+import './_env';
 import './env';
 import { Client } from 'pg';
+import { connectionConfig } from '../src/lib/db/connection';
 import { parseArgs } from 'node:util';
 import type { Db, Row } from '../src/lib/db/types';
 import { createEnrollmentCode } from '../src/lib/auth/session';
@@ -60,7 +62,7 @@ async function main() {
     return c;
   });
 
-  const client = new Client({ connectionString: url });
+  const client = new Client(connectionConfig(url));
   await client.connect();
   const db: Db = {
     async query<T = Row>(text: string, params: unknown[] = []) {

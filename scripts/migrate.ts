@@ -3,16 +3,18 @@
  * The same folder works with `supabase db push`; use one method consistently.
  * Usage: DATABASE_URL=... npm run db:migrate
  */
+import './_env';
 import './env';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Client } from 'pg';
+import { connectionConfig } from '../src/lib/db/connection';
 
 async function main() {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error('DATABASE_URL is required');
   const dir = join(__dirname, '..', 'supabase', 'migrations');
-  const client = new Client({ connectionString: url });
+  const client = new Client(connectionConfig(url));
   await client.connect();
   try {
     await client.query(

@@ -9,6 +9,20 @@ import { can, branchScope, type Grant } from '@/lib/auth/permissions';
 import { applyDigits, dictionaries, formatDate, formatLongDate, formatTime, localDate, t } from '@/lib/i18n';
 import { ERROR_CODES } from '@/lib/errors';
 
+describe('database connection settings', () => {
+  it('encrypts anything that is not local, and verifies when a CA is given', async () => {
+    const { connectionConfig } = await import('@/lib/db/connection');
+    expect(connectionConfig('postgres://u:p@127.0.0.1:5432/db', undefined).ssl).toBe(false);
+    const remote = connectionConfig('postgres://u:p@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres?sslmode=disable', undefined);
+    expect(remote.ssl).toEqual({ rejectUnauthorized: false });
+    expect(remote.connectionString).not.toContain('sslmode');
+    const pem = '-----BEGIN CERTIFICATE-----\\nabc\\n-----END CERTIFICATE-----';
+    expect(connectionConfig('postgres://u:p@db.example.com/db', pem).ssl).toEqual({
+      ca: '-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----', rejectUnauthorized: true,
+    });
+  });
+});
+
 describe('IP allowlist', () => {
   it('matches addresses and ranges', () => {
     expect(ipAllowed('203.0.113.20', ['203.0.113.0/24'])).toBe(true);
