@@ -3,6 +3,7 @@
  * and again if the domain or the webhook secret changes.
  * Usage: TELEGRAM_BOT_TOKEN=... TELEGRAM_WEBHOOK_SECRET=... APP_URL=https://your-domain npm run bot:setup
  */
+import './env';
 async function main() {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
