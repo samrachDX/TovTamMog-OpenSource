@@ -5,9 +5,12 @@ import { ApiError, api, getToken, setToken } from '@/lib/client/api';
 import { telegram } from '@/lib/client/telegram';
 import type { Digits, Locale } from '@/lib/i18n';
 import { ClockFlow } from './ClockFlow';
+import { History } from './History';
 import { Home, type Me } from './Home';
 import { I18nProvider, useI18n } from './i18n-context';
 import { PinPad } from './PinPad';
+import { RequestForm, type RecordRef, type RequestKind } from './RequestForm';
+import { Requests } from './Requests';
 import { Button, Header, LanguageSwitch, Notice, Screen, Spinner } from './ui';
 
 type Phase =
@@ -16,9 +19,12 @@ type Phase =
   | { name: 'not_enrolled' }
   | { name: 'pin_setup'; first?: string; mismatch?: boolean }
   | { name: 'pin_required' }
-  | { name: 'ready'; me: Me }
+  | { name: 'ready'; me: Me; tab: Tab }
+  | { name: 'request'; me: Me; back: Tab; kind: RequestKind; record?: RecordRef }
   | { name: 'clocking'; me: Me; action: 'clock_in' | 'clock_out' }
   | { name: 'error'; message: string };
+
+type Tab = 'home' | 'history' | 'requests';
 
 type AuthResponse = { state: 'not_enrolled' | 'pin_setup' | 'pin_required' | 'ready'; token?: string };
 type MeResponse =
@@ -49,7 +55,7 @@ function Flow() {
     const me = await api<MeResponse>('/api/me', { locale });
     if (me.state === 'ready') {
       hydrate({ locale: me.profile.locale, digits: me.profile.digits, timeZone: me.profile.timezone });
-      setPhase({ name: 'ready', me });
+      setPhase((prev) => ({ name: 'ready', me, tab: prev.name === 'ready' ? prev.tab : 'home' }));
     } else {
       hydrate({ locale: me.locale, digits: me.digits });
       setPhase(me.state === 'pin_setup' ? { name: 'pin_setup' } : { name: 'pin_required' });
@@ -230,10 +236,29 @@ function Flow() {
         </Screen>
       );
 
-    case 'ready':
+    case 'ready': {
+      const { me, tab } = phase;
+      const go = (next: Tab) => setPhase({ name: 'ready', me, tab: next });
       return (
         <Screen>
-          <Home me={phase.me} onClock={(action) => setPhase({ name: 'clocking', me: phase.me, action })} />
+          {error ? <Notice tone="danger">{error}</Notice> : null}
+          {tab === 'home' ? <Home me={me} onClock={(action) => setPhase({ name: 'clocking', me, action })} /> : null}
+          {tab === 'history' ? <History onRequest={(kind, record) => setPhase({ name: 'request', me, back: 'history', kind, record })} /> : null}
+          {tab === 'requests' ? <Requests onNew={(kind) => setPhase({ name: 'request', me, back: 'requests', kind })} /> : null}
+          <TabBar tab={tab} onChange={go} />
+        </Screen>
+      );
+    }
+
+    case 'request':
+      return (
+        <Screen>
+          <RequestForm
+            kind={phase.kind}
+            record={phase.record}
+            // After sending, show the list of requests; after cancelling, go back where they were.
+            onDone={(saved) => setPhase({ name: 'ready', me: phase.me, tab: saved ? 'requests' : phase.back })}
+          />
         </Screen>
       );
 
@@ -243,10 +268,42 @@ function Flow() {
           action={phase.action}
           onDone={(changed) => {
             // Show the previous data immediately, then replace it with what the server has.
-            setPhase({ name: 'ready', me: phase.me });
+            setPhase({ name: 'ready', me: phase.me, tab: 'home' });
             if (changed) void run(loadMe);
           }}
         />
       );
   }
+}
+
+function TabBar({ tab, onChange }: { tab: Tab; onChange(tab: Tab): void }) {
+  const { t } = useI18n();
+  const items: [Tab, string][] = [['home', t('nav.attendance')], ['history', t('nav.history')], ['requests', t('requests.title')]];
+  return (
+    <>
+      {/* Keeps page content clear of the fixed bar. */}
+      <div aria-hidden="true" className="h-16 shrink-0" />
+      <nav
+        aria-label={t('portal.nav')}
+        className="fixed inset-x-0 bottom-0 border-t border-line bg-surface pb-[env(safe-area-inset-bottom)]"
+      >
+        <ul className="mx-auto grid max-w-md grid-cols-3">
+          {items.map(([key, label]) => (
+            <li key={key}>
+              <button
+                type="button"
+                aria-current={tab === key ? 'page' : undefined}
+                onClick={() => onChange(key)}
+                className={`pressable min-h-14 w-full border-t-2 px-1 text-sm ${
+                  tab === key ? 'border-primary-strong font-semibold text-ink' : 'border-transparent text-muted'
+                }`}
+              >
+                {label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </nav>
+    </>
+  );
 }

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import { api } from '@/lib/client/api';
 import { useI18n } from '@/components/mini-app/i18n-context';
@@ -10,7 +11,7 @@ type Row = {
   branchId: string; nameKm: string; nameEn: string; activeEmployees: number; scheduled: number;
   clockedIn: number; late: number; absent: number; missedClockOut: number;
 };
-type Data = { date: string; generatedAt: string; totals: Omit<Row, 'branchId' | 'nameKm' | 'nameEn'>; branches: Row[] };
+type Data = { date: string; generatedAt: string; pendingRequests: number; totals: Omit<Row, 'branchId' | 'nameKm' | 'nameEn'>; branches: Row[] };
 
 export function Dashboard() {
   const { t, locale, num, day, time } = useI18n();
@@ -52,6 +53,11 @@ export function Dashboard() {
             <p className="text-sm text-muted">
               {t('portal.dash.asOf', { date: day(d.date), time: time(d.generatedAt) })}
             </p>
+            {d.pendingRequests > 0 ? (
+              <Link href="/hr/requests" className="rounded-xl bg-warning-pale px-4 py-3 font-semibold text-warning underline">
+                {t('portal.dash.pending', { count: d.pendingRequests })}
+              </Link>
+            ) : null}
             <dl className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
               <Tile label={t('portal.dash.active')} value={num(d.totals.activeEmployees)} />
               <Tile label={t('portal.dash.scheduled')} value={num(d.totals.scheduled)} />

@@ -6,6 +6,7 @@ import { resolveLocale, t, type Locale } from '@/lib/i18n';
 import { parseIp } from '@/lib/attendance/ip';
 import { getSession, requirePin, type AuthConfig, type Session } from '@/lib/auth/session';
 import { hasPortalAccess, loadActor, type Actor } from '@/lib/admin/actor';
+import { requirePermission, type Permission } from '@/lib/auth/permissions';
 
 export function authConfig(): AuthConfig {
   const e = env();
@@ -71,6 +72,14 @@ export async function sessionFrom(req: Request): Promise<Session> {
   const header = req.headers.get('authorization') ?? '';
   const token = header.startsWith('Bearer ') ? header.slice(7).trim() : null;
   return getSession(db, authConfig(), token);
+}
+
+/** The signed-in employee for Mini App features beyond clocking: PIN verified and permitted. */
+export async function employeeFrom(req: Request, permission: Permission): Promise<Session> {
+  const session = await sessionFrom(req);
+  requirePin(session);
+  await requirePermission(db, session.employeeId, permission);
+  return session;
 }
 
 /**

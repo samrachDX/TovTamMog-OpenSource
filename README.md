@@ -27,11 +27,19 @@ Built and tested:
   - Schedule: shift templates, bulk assignment with conflict detection, drafts and
     publishing, overnight shifts.
   - Attendance records, rejected attempts, and the audit log.
+- Employee attendance history, and requests: leave, absence and lateness explanations,
+  missed clock-out and attendance corrections, each with a decision history.
+- Request review in the portal. Approving a correction changes the record through an
+  adjustment row that keeps the original values, the reason, who asked and who approved.
+  HR can also adjust a record directly. Nobody can decide or adjust their own.
+- Scheduled job (`/api/internal/attendance-check`, see `vercel.json`): flags missed
+  clock-outs and records absences for unattended shifts not covered by approved leave.
+- Attendance CSV export (logged in the audit trail).
 - Khmer/English dictionaries with a completeness check that runs in every build.
 
-Not built yet: attendance history for employees, requests and corrections (with
-adjustments), events/holidays/announcements, Telegram bot notifications and webhook,
-scheduled attendance processing, report export, employee import/export, file uploads.
+Not built yet: events/holidays/announcements and popups, Telegram bot notifications and
+webhook, employee import/export, file uploads (photos, logos), editing shift templates,
+second-approver flow for high-risk changes.
 
 ## Setup
 
@@ -87,6 +95,10 @@ append-only (trigger-enforced).
 - **Database access.** The app connects with a privileged connection from server code
   only and does its own authorization. Row level security is enabled on every table with
   no policies, so the Supabase anon and authenticated API roles can read nothing.
+- **Scheduled job frequency.** `vercel.json` runs it once a day (02:30 Phnom Penh), which is
+  what Vercel's Hobby plan allows. On Pro, change the schedule to every 15 minutes so
+  absences and missed clock-outs appear sooner. The dashboard already counts absences
+  live, and an overdue open shift is also flagged the next time that person scans.
 - **Khmer wording** in `src/lib/i18n/km.ts` needs review by a fluent Khmer speaker before
   production, including the Khmer spelling of the app name.
 

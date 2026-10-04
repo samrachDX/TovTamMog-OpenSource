@@ -1,18 +1,19 @@
 'use client';
 
 import { useState } from 'react';
-import { api } from '@/lib/client/api';
+import { ApiError, api, getToken } from '@/lib/client/api';
 import { localDate, type MessageKey } from '@/lib/i18n';
 import { useI18n } from '@/components/mini-app/i18n-context';
 import { usePortal } from '../PortalShell';
+import { RecordDialog } from './RecordDialog';
 import {
-  Badge, Card, DataTable, Field, LoadState, PageHeader, Pager, Select, SmallButton, TextInput, useLoad, type Column,
+  Badge, Card, DataTable, Field, LoadState, Notice, PageHeader, Pager, Select, SmallButton, TextInput, useLoad, type Column,
 } from '../ui';
 
 type RecordStatus = 'clocked_in' | 'completed' | 'missed_clock_out' | 'absent' | 'pending_correction' | 'under_review';
 type Rec = {
   id: string; workDate: string; status: RecordStatus; clockInAt: string | null; clockOutAt: string | null;
-  lateMinutes: number; earlyLeaveMinutes: number; workedMinutes: number | null; employeeCode: string;
+  lateMinutes: number; earlyLeaveMinutes: number; workedMinutes: number | null; employeeId: string; employeeCode: string; branchId: string;
   nameKm: string; nameEn: string | null; branchKm: string; branchEn: string; shiftStartAt: string | null; shiftEndAt: string | null;
 };
 type Attempt = {
@@ -28,7 +29,7 @@ const TONE: Record<RecordStatus, 'ok' | 'warn' | 'bad' | 'muted'> = {
 const LIMIT = 50;
 
 export function Attendance() {
-  const { t, locale, timeZone, time, day, dateTime, num } = useI18n();
+  const { t, locale, timeZone, time, day, dateTime, num, errorText } = useI18n();
   const { me, name, can } = usePortal();
   const today = localDate(new Date(), timeZone);
   const [tab, setTab] = useState<'records' | 'attempts'>('records');
@@ -37,6 +38,35 @@ export function Attendance() {
   const [offset, setOffset] = useState(0);
   const set = (k: keyof typeof f, v: string) => setF((x) => ({ ...x, [k]: v }));
   const canAttempts = can('attendance.attempts.view');
+  const [selected, setSelected] = useState<Rec | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  /** Downloads the CSV with the session token; a plain link could not send it. */
+  const exportCsv = async () => {
+    setExporting(true);
+    setExportError(null);
+    try {
+      const res = await fetch(`/api/portal/attendance/export?from=${applied.from}&to=${applied.to}&branchId=${applied.branchId}`, {
+        headers: { authorization: `Bearer ${getToken() ?? ''}`, 'x-locale': locale },
+        cache: 'no-store',
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new ApiError(body?.error?.code ?? 'INTERNAL', body?.error?.message ?? '', res.status, body);
+      }
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `attendance_${applied.from}_${applied.to}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setExportError(errorText(err));
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const records = useLoad(
     () => api<{ items: Rec[]; total: number }>(
@@ -104,7 +134,13 @@ export function Attendance() {
 
   return (
     <>
-      <PageHeader title={t('nav.attendance')} />
+      <PageHeader
+        title={t('nav.attendance')}
+        actions={can('report.export') ? (
+          <SmallButton disabled={exporting} onClick={() => void exportCsv()}>{exporting ? t('common.loading') : t('portal.att.export')}</SmallButton>
+        ) : null}
+      />
+      {exportError ? <Notice tone="danger">{exportError}</Notice> : null}
       <form
         className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6"
         onSubmit={(e) => { e.preventDefault(); setOffset(0); setApplied(f); }}
@@ -147,7 +183,7 @@ export function Attendance() {
           <LoadState state={records}>
             {(d) => (
               <>
-                <DataTable rows={d.items} columns={recordColumns} rowKey={(r) => r.id} empty={t('portal.empty')} />
+                <DataTable rows={d.items} columns={recordColumns} rowKey={(r) => r.id} onRowClick={(r) => setSelected(r)} empty={t('portal.empty')} />
                 <Pager total={d.total} limit={LIMIT} offset={offset} onChange={setOffset} />
               </>
             )}
@@ -163,6 +199,7 @@ export function Attendance() {
           </LoadState>
         )}
       </Card>
+      <RecordDialog record={selected} onClose={() => setSelected(null)} onChanged={records.reload} />
     </>
   );
 }

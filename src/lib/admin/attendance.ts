@@ -1,6 +1,7 @@
 import type { Db } from '@/lib/db/types';
 import { AppError } from '@/lib/errors';
 import { localDate } from '@/lib/i18n';
+import { countPendingRequests } from '@/lib/requests';
 import { date, oneOf, optText, optUuid, paging, requireCan, scopeOf, type Actor } from './actor';
 
 type Input = Record<string, unknown>;
@@ -122,7 +123,9 @@ export async function getDashboard(db: Db, actor: Actor, filter: Input = {}) {
          where r.branch_id = b.id and r.work_date = $3::date and r.late_minutes > 0) as late,
        (select count(*)::int from shift_assignments sa
          where sa.branch_id = b.id and sa.work_date = $3::date and sa.status = 'published' and sa.end_at <= $4::timestamptz
-           and not exists (select 1 from attendance_records r where r.shift_assignment_id = sa.id))
+           and not exists (select 1 from attendance_records r where r.shift_assignment_id = sa.id)
+           and not exists (select 1 from employee_requests q where q.employee_id = sa.employee_id and q.type = 'leave'
+                             and q.status = 'approved' and sa.work_date between q.start_date and q.end_date))
        + (select count(*)::int from attendance_records r
          where r.branch_id = b.id and r.work_date = $3::date and r.status = 'absent') as absent,
        (select count(*)::int from attendance_records r
@@ -143,6 +146,7 @@ export async function getDashboard(db: Db, actor: Actor, filter: Input = {}) {
   return {
     date: day,
     generatedAt: now,
+    pendingRequests: await countPendingRequests(db, actor),
     totals: {
       activeEmployees: n, scheduled: sum('scheduled'), clockedIn: sum('clockedIn'), late: sum('late'),
       absent: sum('absent'), missedClockOut: sum('missedClockOut'),
@@ -165,4 +169,48 @@ export async function listAudit(db: Db, actor: Actor, filter: Input) {
      where a.org_id = $1 order by a.created_at desc limit $2 offset $3`,
     [actor.orgId, limit, offset],
   );
+}
+
+const csvCell = (v: unknown): string => {
+  let s = v === null || v === undefined ? '' : String(v);
+  // Neutralise spreadsheet formulas in names and codes.
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
+
+/**
+ * Attendance records for a date range as CSV. Times are written in the organization's
+ * timezone. Column headers are passed in so the file matches the user's language.
+ */
+export async function exportAttendanceCsv(db: Db, actor: Actor, filter: Input, headers: string[], statusLabel: (s: string) => string): Promise<string> {
+  const branchId = optUuid(filter, 'branchId');
+  if (branchId) requireCan(actor, 'report.export', branchId);
+  const branches = branchId ? [branchId] : scopeOf(actor, 'report.export');
+  const { from, to } = range(filter);
+  const tz = await orgTimezone(db, actor);
+  const rows = await db.query<Record<string, string | number | null>>(
+    `select r.work_date::text as d, e.employee_code as code, e.name_km, e.name_en, b.name_km as branch_km, b.name_en as branch_en,
+            to_char(sa.start_at at time zone $5, 'HH24:MI') as shift_start, to_char(sa.end_at at time zone $5, 'HH24:MI') as shift_end,
+            to_char(r.clock_in_at at time zone $5, 'YYYY-MM-DD HH24:MI') as clock_in,
+            to_char(r.clock_out_at at time zone $5, 'YYYY-MM-DD HH24:MI') as clock_out,
+            r.late_minutes, r.early_leave_minutes, r.worked_minutes, r.status,
+            (select count(*)::int from attendance_adjustments a where a.record_id = r.id) as adjustments
+     from attendance_records r
+     join employees e on e.id = r.employee_id
+     join branches b on b.id = r.branch_id
+     left join shift_assignments sa on sa.id = r.shift_assignment_id
+     where r.org_id = $1 and ($2::uuid[] is null or r.branch_id = any($2::uuid[])) and r.work_date between $3::date and $4::date
+     order by r.work_date, b.name_en, e.employee_code
+     limit 50000`,
+    [actor.orgId, branches, from, to, tz],
+  );
+  const lines = [headers.map(csvCell).join(',')];
+  for (const r of rows) {
+    lines.push([
+      r.d, r.code, r.name_km, r.name_en, r.branch_km, r.branch_en, r.shift_start, r.shift_end, r.clock_in, r.clock_out,
+      r.late_minutes, r.early_leave_minutes, r.worked_minutes, statusLabel(String(r.status)), r.adjustments,
+    ].map(csvCell).join(','));
+  }
+  // The byte order mark makes Excel read Khmer text as UTF-8.
+  return '\uFEFF' + lines.join('\r\n') + '\r\n';
 }

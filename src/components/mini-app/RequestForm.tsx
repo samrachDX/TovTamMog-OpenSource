@@ -1,0 +1,119 @@
+'use client';
+
+import { useState } from 'react';
+import { api } from '@/lib/client/api';
+import { localDate } from '@/lib/i18n';
+import { useI18n } from './i18n-context';
+import { Button, Header, Notice } from './ui';
+
+export type RecordRef = { id: string; workDate: string; clockInAt: string | null; clockOutAt: string | null };
+export type RequestKind = 'leave' | 'absence' | 'late' | 'missed_clock_out' | 'correction';
+
+const INPUT = 'min-h-12 w-full rounded-xl border border-line bg-surface px-3';
+
+function nextDay(day: string): string {
+  const d = new Date(`${day}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * One form for every request type. Leave and absence take dates; the record-based types
+ * are opened from a history entry and take the corrected times for that day.
+ */
+export function RequestForm({ kind, record, onDone }: { kind: RequestKind; record?: RecordRef; onDone(saved: boolean): void }) {
+  const { t, locale, timeZone, day, time, errorText } = useI18n();
+  const today = localDate(new Date(), timeZone);
+  const [startDate, setStartDate] = useState(today);
+  const [endDate, setEndDate] = useState(today);
+  const [clockIn, setClockIn] = useState('');
+  const [clockOut, setClockOut] = useState('');
+  const [outNextDay, setOutNextDay] = useState(false);
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const needsOut = kind === 'missed_clock_out';
+  const timesOk = kind === 'correction' ? !!(clockIn || clockOut) : needsOut ? !!clockOut : true;
+  const valid = reason.trim().length >= 3 && timesOk && (kind !== 'leave' || endDate >= startDate);
+
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const body: Record<string, unknown> = { type: kind, reason: reason.trim() };
+      if (kind === 'leave') Object.assign(body, { startDate, endDate });
+      if (kind === 'absence') Object.assign(body, { startDate });
+      if (record) {
+        body.attendanceRecordId = record.id;
+        if (kind === 'correction' && clockIn) body.proposedClockIn = { date: record.workDate, time: clockIn };
+        if ((kind === 'correction' || needsOut) && clockOut) {
+          body.proposedClockOut = { date: outNextDay ? nextDay(record.workDate) : record.workDate, time: clockOut };
+        }
+      }
+      await api('/api/requests', { body, locale });
+      onDone(true);
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form className="flex flex-1 flex-col gap-4" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
+      <Header title={t(`requests.type.${kind}`)} body={t(`requests.help.${kind}`)} />
+
+      {record ? (
+        <dl className="grid grid-cols-3 gap-2 rounded-xl bg-pale p-3 text-sm">
+          <div><dt className="text-muted">{t('portal.date')}</dt><dd className="font-semibold">{day(record.workDate)}</dd></div>
+          <div><dt className="text-muted">{t('home.clockInTime')}</dt><dd className="font-semibold">{record.clockInAt ? time(record.clockInAt) : '—'}</dd></div>
+          <div><dt className="text-muted">{t('home.clockOutTime')}</dt><dd className="font-semibold">{record.clockOutAt ? time(record.clockOutAt) : '—'}</dd></div>
+        </dl>
+      ) : null}
+
+      {kind === 'leave' ? (
+        <div className="grid grid-cols-2 gap-3">
+          <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('portal.from')}</span>
+            <input type="date" required className={INPUT} value={startDate} onChange={(e) => { setStartDate(e.target.value); if (e.target.value > endDate) setEndDate(e.target.value); }} />
+          </label>
+          <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('portal.to')}</span>
+            <input type="date" required min={startDate} className={INPUT} value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+          </label>
+        </div>
+      ) : null}
+      {kind === 'absence' ? (
+        <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('portal.date')}</span>
+          <input type="date" required max={today} className={INPUT} value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+        </label>
+      ) : null}
+
+      {kind === 'correction' ? (
+        <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('requests.correctIn')}</span>
+          <input type="time" className={INPUT} value={clockIn} onChange={(e) => setClockIn(e.target.value)} />
+        </label>
+      ) : null}
+      {kind === 'correction' || needsOut ? (
+        <>
+          <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('requests.correctOut')}</span>
+            <input type="time" required={needsOut} className={INPUT} value={clockOut} onChange={(e) => setClockOut(e.target.value)} />
+          </label>
+          <label className="flex min-h-11 items-center gap-3 text-sm">
+            <input type="checkbox" className="size-5" checked={outNextDay} onChange={(e) => setOutNextDay(e.target.checked)} />
+            <span>{t('requests.outNextDay')}</span>
+          </label>
+        </>
+      ) : null}
+
+      <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('portal.reason')}</span>
+        <textarea required minLength={3} maxLength={1000} rows={4} className={`${INPUT} py-2`} value={reason} onChange={(e) => setReason(e.target.value)} />
+      </label>
+
+      {error ? <Notice tone="danger">{error}</Notice> : null}
+      <div className="mt-auto flex flex-col gap-3">
+        <Button type="submit" disabled={busy || !valid}>{busy ? t('common.loading') : t('requests.submit')}</Button>
+        <Button variant="secondary" onClick={() => onDone(false)}>{t('common.cancel')}</Button>
+      </div>
+    </form>
+  );
+}

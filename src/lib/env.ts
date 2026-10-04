@@ -14,6 +14,8 @@ const schema = z.object({
   TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: z.coerce.number().int().positive().default(3600),
   SESSION_TTL_HOURS: z.coerce.number().int().positive().default(24),
   PIN_SESSION_TTL_MINUTES: z.coerce.number().int().positive().default(720),
+  /** Shared secret for the scheduled job endpoint. Vercel Cron sends it as a bearer token. */
+  CRON_SECRET: z.string().min(16).optional(),
   /** Development only: pretend requests come from this IP. Ignored in production. */
   DEV_CLIENT_IP: z.string().optional(),
 });

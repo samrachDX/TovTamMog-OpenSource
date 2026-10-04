@@ -116,7 +116,7 @@ export function DataTable<T>({
   if (!rows.length) return <p className="py-6 text-center text-muted">{empty}</p>;
   const primary = columns.find((c) => c.primary) ?? columns[0];
   const rest = columns.filter((c) => c !== primary);
-  const open = (row: T) => (onRowClick ? { onClick: () => onRowClick(row), tabIndex: 0, role: 'link' as const,
+  const open = (row: T) => (onRowClick ? { onClick: () => onRowClick(row), tabIndex: 0,
     onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter') onRowClick(row); } } : {});
   return (
     <>
