@@ -2,6 +2,7 @@ import { db } from '@/lib/db';
 import { AppError } from '@/lib/errors';
 import { uuid } from '@/lib/admin/actor';
 import { cancelAssignment, publishAssignments } from '@/lib/admin/schedule';
+import { removeWeeklySchedule } from '@/lib/admin/weekly';
 import { flushOutbox, handle, json, portalActor, readJson } from '@/lib/http';
 
 export function POST(req: Request) {
@@ -15,6 +16,8 @@ export function POST(req: Request) {
       case 'cancel':
         await cancelAssignment(db, actor, uuid(body, 'id'), body);
         return json({ ok: true });
+      case 'weekly_remove':
+        return json(await removeWeeklySchedule(db, actor, uuid(body, 'id'), body));
       default:
         throw new AppError('BAD_REQUEST');
     }

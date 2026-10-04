@@ -14,7 +14,11 @@ import type { EmployeeItem } from './Employees';
 type Template = { id: string; nameKm: string; nameEn: string; startTime: string; endTime: string; active: boolean; overnight: boolean };
 type Assignment = {
   id: string; employeeId: string; employeeCode: string; nameKm: string; nameEn: string | null; workDate: string;
-  startAt: string; endAt: string; status: 'draft' | 'published'; hasAttendance: boolean;
+  startAt: string; endAt: string; status: 'draft' | 'published'; hasAttendance: boolean; fromWeekly: boolean;
+};
+type Weekly = {
+  id: string; employeeId: string; employeeCode: string; nameKm: string; nameEn: string | null; templateKm: string; templateEn: string;
+  startTime: string; endTime: string; weekdays: number[]; startsOn: string; endsOn: string | null;
 };
 
 const WEEKDAYS: MessageKey[] = [
@@ -59,6 +63,12 @@ export function Schedule() {
     [branchId],
   );
 
+  const weekly = useLoad(
+    () => (branchId ? api<{ items: Weekly[] }>(`/api/portal/schedule/weekly?branchId=${branchId}`, { locale }) : Promise.resolve({ items: [] })),
+    [branchId],
+  );
+  const [settingWeekly, setSettingWeekly] = useState(false);
+  const [removeWeekly, setRemoveWeekly] = useState<Weekly | null>(null);
   const [assigning, setAssigning] = useState(false);
   const [templating, setTemplating] = useState(false);
   const [cancel, setCancel] = useState<Assignment | null>(null);
@@ -111,7 +121,8 @@ export function Schedule() {
         actions={canManage ? (
           <>
             <SmallButton onClick={() => setTemplating(true)}>{t('portal.sched.addTemplate')}</SmallButton>
-            <SmallButton tone="primary" onClick={() => setAssigning(true)}>{t('portal.sched.assign')}</SmallButton>
+            <SmallButton onClick={() => setAssigning(true)}>{t('portal.sched.assign')}</SmallButton>
+            <SmallButton tone="primary" onClick={() => setSettingWeekly(true)}>{t('portal.weekly.set')}</SmallButton>
           </>
         ) : null}
       />
@@ -133,6 +144,34 @@ export function Schedule() {
 
       {notice ? <Notice tone="success">{notice}</Notice> : null}
       {error ? <Notice tone="danger">{error}</Notice> : null}
+
+      <Card title={t('portal.weekly.title')}>
+        <p className="mb-3 text-sm text-muted">{t('portal.weekly.note')}</p>
+        <LoadState state={weekly}>
+          {(d) => d.items.length ? (
+            <ul className="flex flex-col gap-2 text-sm">
+              {d.items.map((w) => (
+                <li key={w.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-line pb-2 last:border-0 last:pb-0">
+                  <span className="min-w-40 font-semibold">{name(w)} <span className="font-normal text-muted">· {w.employeeCode}</span></span>
+                  <span className="flex flex-1 flex-wrap items-center gap-1.5">
+                    <span className="tabular-nums">{name({ nameKm: w.templateKm, nameEn: w.templateEn })} {w.startTime}–{w.endTime}</span>
+                    {WEEKDAYS.map((k, i) => (
+                      <span
+                        key={k}
+                        className={`rounded px-1.5 py-0.5 text-xs ${w.weekdays.includes(i + 1) ? 'bg-primary font-semibold text-ink' : 'bg-pale text-muted line-through'}`}
+                      >
+                        {t(k)}
+                      </span>
+                    ))}
+                    {w.endsOn ? <span className="text-muted">{t('portal.weekly.until', { date: day(w.endsOn) })}</span> : null}
+                  </span>
+                  {canManage ? <SmallButton tone="danger" onClick={() => setRemoveWeekly(w)}>{t('portal.remove')}</SmallButton> : null}
+                </li>
+              ))}
+            </ul>
+          ) : <p className="text-sm text-muted">{t('portal.weekly.none')}</p>}
+        </LoadState>
+      </Card>
 
       <Card
         title={t('portal.sched.week')}
@@ -237,6 +276,28 @@ export function Schedule() {
         staff={staff.data?.items ?? []}
         onClose={() => setAssigning(false)}
         onDone={(msg) => { setNotice(msg); shifts.reload(); }}
+      />
+      <WeeklyDialog
+        key={`w${settingWeekly}`}
+        open={settingWeekly}
+        branchId={branchId}
+        today={today}
+        templates={templates.data?.items.filter((x) => x.active) ?? []}
+        staff={staff.data?.items ?? []}
+        onClose={() => setSettingWeekly(false)}
+        onDone={(msg) => { setNotice(msg); weekly.reload(); shifts.reload(); }}
+      />
+      <ReasonDialog
+        open={removeWeekly !== null}
+        title={t('portal.weekly.remove')}
+        description={removeWeekly ? `${name(removeWeekly)} · ${t('portal.weekly.removeNote')}` : undefined}
+        danger
+        onClose={() => setRemoveWeekly(null)}
+        onConfirm={async (reason) => {
+          await api('/api/portal/schedule/actions', { body: { type: 'weekly_remove', id: removeWeekly!.id, reason }, locale });
+          weekly.reload();
+          shifts.reload();
+        }}
       />
       <ReasonDialog
         open={cancel !== null}
@@ -379,6 +440,94 @@ function AssignDialog({
           </SmallButton>
         </div>
       </form>
+    </Dialog>
+  );
+}
+
+function WeeklyDialog({
+  open, branchId, today, templates, staff, onClose, onDone,
+}: {
+  open: boolean; branchId: string; today: string; templates: Template[]; staff: EmployeeItem[];
+  onClose(): void; onDone(message: string): void;
+}) {
+  const { t, locale, errorText } = useI18n();
+  const { name } = usePortal();
+  const [templateId, setTemplateId] = useState(templates[0]?.id ?? '');
+  const [weekdays, setWeekdays] = useState<number[]>([1, 2, 3, 4, 5, 6]);
+  const [employeeIds, setEmployeeIds] = useState<string[]>([]);
+  const [startsOn, setStartsOn] = useState(today);
+  const [endsOn, setEndsOn] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const toggle = <T,>(list: T[], v: T, on: boolean) => (on ? [...list, v] : list.filter((x) => x !== v));
+
+  return (
+    <Dialog open={open} title={t('portal.weekly.set')} onClose={onClose}>
+      {!templates.length ? (
+        <>
+          <Notice tone="warning">{t('portal.weekly.needTemplate')}</Notice>
+          <div className="flex justify-end"><SmallButton onClick={onClose}>{t('common.close')}</SmallButton></div>
+        </>
+      ) : (
+        <form
+          className="flex flex-col gap-3"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setBusy(true);
+            setError(null);
+            try {
+              const res = await api<{ schedules: number; shifts: number }>('/api/portal/schedule/weekly', {
+                body: { branchId, templateId, weekdays, employeeIds, startsOn, endsOn: endsOn || undefined },
+                locale,
+              });
+              onDone(t('portal.weekly.done', { people: res.schedules, shifts: res.shifts }));
+              onClose();
+            } catch (err) {
+              setError(errorText(err));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          <p className="text-sm text-muted">{t('portal.weekly.setNote')}</p>
+          <Field label={t('home.shift')}>
+            <Select value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
+              {templates.map((tp) => <option key={tp.id} value={tp.id}>{name(tp)} · {tp.startTime}–{tp.endTime}</option>)}
+            </Select>
+          </Field>
+          <fieldset className="rounded-lg border border-line px-3 pb-1">
+            <legend className="px-1 text-sm text-muted">{t('portal.weekly.workingDays')}</legend>
+            <div className="grid grid-cols-4 gap-x-3 sm:grid-cols-7">
+              {WEEKDAYS.map((k, i) => (
+                <Check key={k} label={t(k)} checked={weekdays.includes(i + 1)} onChange={(v) => setWeekdays((x) => toggle(x, i + 1, v))} />
+              ))}
+            </div>
+          </fieldset>
+          <fieldset className="rounded-lg border border-line px-3 pb-1">
+            <legend className="px-1 text-sm text-muted">{t('nav.employees')}</legend>
+            <div className="flex gap-2 py-1">
+              <SmallButton onClick={() => setEmployeeIds(staff.map((s) => s.id))}>{t('portal.selectAll')}</SmallButton>
+              <SmallButton onClick={() => setEmployeeIds([])}>{t('portal.selectNone')}</SmallButton>
+            </div>
+            <div className="grid max-h-56 gap-x-3 overflow-y-auto sm:grid-cols-2">
+              {staff.map((s) => (
+                <Check key={s.id} label={`${name(s)} · ${s.employeeCode}`} checked={employeeIds.includes(s.id)} onChange={(v) => setEmployeeIds((x) => toggle(x, s.id, v))} />
+              ))}
+            </div>
+          </fieldset>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={t('portal.weekly.startsOn')}><TextInput type="date" required value={startsOn} onChange={(e) => setStartsOn(e.target.value)} /></Field>
+            <Field label={t('portal.weekly.endsOn')} hint={t('portal.weekly.endsOnHint')}><TextInput type="date" min={startsOn} value={endsOn} onChange={(e) => setEndsOn(e.target.value)} /></Field>
+          </div>
+          {error ? <Notice tone="danger">{error}</Notice> : null}
+          <div className="flex justify-end gap-2">
+            <SmallButton onClick={onClose}>{t('common.cancel')}</SmallButton>
+            <SmallButton type="submit" tone="primary" disabled={busy || !employeeIds.length || !weekdays.length}>
+              {busy ? t('common.loading') : t('portal.save')}
+            </SmallButton>
+          </div>
+        </form>
+      )}
     </Dialog>
   );
 }

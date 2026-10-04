@@ -127,6 +127,19 @@ export async function publishEvent(db: Db, actor: Actor, id: string): Promise<{ 
       id, actor.employeeId, now,
     ]);
 
+    // A non-working holiday clears the shifts that weekly schedules had already laid down
+    // for those days. Shifts someone assigned by hand are deliberate and stay.
+    if (ev.nonWorking) {
+      await tx.query(
+        `delete from shift_assignments sa using branches b
+         where b.id = sa.branch_id and b.org_id = $1 and sa.pattern_id is not null and sa.status = 'published'
+           and sa.work_date between $2::date and $3::date and sa.start_at > $4
+           and ($5::uuid[] is null or sa.branch_id = any($5::uuid[]))
+           and not exists (select 1 from attendance_records r where r.shift_assignment_id = sa.id)`,
+        [actor.orgId, ev.startsOn, ev.endsOn, now, ev.branchIds.length ? ev.branchIds : null],
+      );
+    }
+
     const audience = await tx.query<{ id: string }>(
       `select e.id from employees e
        where e.org_id = $1 and e.status = 'active'

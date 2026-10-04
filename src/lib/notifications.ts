@@ -6,6 +6,7 @@ export type NotificationKind =
   | 'request_approved'
   | 'request_rejected'
   | 'schedule_published'
+  | 'weekly_schedule'
   | 'missed_clock_out'
   | 'absent_recorded'
   | 'pin_reset'

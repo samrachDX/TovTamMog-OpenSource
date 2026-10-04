@@ -2,8 +2,9 @@ import type { Db } from '@/lib/db/types';
 import { purgeRateLimits } from '@/lib/auth/rate-limit';
 import { dmy, notify, type Notice } from '@/lib/notifications';
 import { purgeTelegramLogs } from '@/lib/telegram/bot';
+import { generateWeeklyShifts } from '@/lib/admin/weekly';
 
-export type MaintenanceResult = { missedClockOuts: number; absences: number };
+export type MaintenanceResult = { missedClockOuts: number; absences: number; generatedShifts: number };
 
 /**
  * Scheduled housekeeping. Safe to run as often as you like; each step only touches
@@ -76,5 +77,8 @@ export async function runAttendanceMaintenance(
   await purgeTelegramLogs(db, now);
   await db.query(`delete from sessions where expires_at < $1::timestamptz - interval '30 days'`, [now]);
 
-  return { missedClockOuts: missed.length, absences: absent.length };
+  // Keeps the coming weeks filled from everyone's weekly schedule.
+  const generatedShifts = await generateWeeklyShifts(db, { now });
+
+  return { missedClockOuts: missed.length, absences: absent.length, generatedShifts };
 }

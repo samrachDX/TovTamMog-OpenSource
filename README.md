@@ -52,6 +52,10 @@ Built and tested:
 - Custom roles (`/admin/roles`): duplicate a built-in role or start from nothing, choose
   permissions and a level. A role can only contain permissions its author holds and must
   sit below the author's own level.
+- Fixed weekly schedules: give a person a shift template on chosen weekdays once, and
+  their shifts are created and published automatically (three weeks ahead by the daily
+  job, further when a later week is opened). One-off days off and hand-made shifts are
+  respected; non-working holidays get no shifts.
 - Khmer/English dictionaries with a completeness check that runs in every build.
 
 Not built yet: employee import/export, branch logos and event images,

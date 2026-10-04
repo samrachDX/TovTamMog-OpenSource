@@ -295,12 +295,12 @@ export const km = {
   'portal.branch.qrRevoke': 'បិទ QR កូដ',
   'portal.branch.qrRevokeNote': 'គ្មាននរណាអាចកត់វត្តមាននៅសាខានេះបានទេ រហូតដល់បង្កើត QR កូដថ្មី។',
   'portal.branch.qrNone': 'សាខានេះមិនមាន QR កូដដែលប្រើបានទេ។',
-  'portal.sched.week': 'កាលវិភាគប្រចាំសប្តាហ៍',
+  'portal.sched.week': 'វេនក្នុងសប្តាហ៍ដែលកំពុងមើល',
   'portal.sched.thisWeek': 'សប្តាហ៍នេះ',
   'portal.sched.templates': 'គំរូវេន',
   'portal.sched.noTemplates': 'មិនទាន់មានគំរូវេនទេ។',
   'portal.sched.addTemplate': 'បន្ថែមគំរូវេន',
-  'portal.sched.assign': 'ចាត់វេន',
+  'portal.sched.assign': 'ចាត់វេនបន្ថែម',
   'portal.sched.assigned': 'បានបង្កើតវេន {created}។ រំលង {conflicts} ដោយសារជាន់ម៉ោងគ្នា។',
   'portal.sched.custom': 'កំណត់ម៉ោងដោយខ្លួនឯង',
   'portal.sched.start': 'ម៉ោងចាប់ផ្តើម',
@@ -543,6 +543,26 @@ export const km = {
   'requests.halfNote': 'កន្លះថ្ងៃ គឺពាក់កណ្តាលនៃវេនការងាររបស់អ្នកនៅថ្ងៃនោះ។',
   'requests.fromTime': 'ពីម៉ោង',
   'requests.toTime': 'ដល់ម៉ោង',
+
+  // ---- Weekly schedules ----
+  'notify.weekly_schedule.title': 'កាលវិភាគការងារប្រចាំសប្តាហ៍របស់អ្នក',
+  'notify.weekly_schedule.body': '{shift}\nរៀងរាល់ថ្ងៃ៖ {days}\nចាប់ពីថ្ងៃ {from}',
+
+  // ---- Weekly schedule screens ----
+  'portal.weekly.title': 'កាលវិភាគប្រចាំសប្តាហ៍ថេរ',
+  'portal.weekly.note': 'កំណត់ម្តង ប្រើរហូត៖ វេនរបស់បុគ្គលិកត្រូវបានបង្កើត និងផ្សព្វផ្សាយដោយស្វ័យប្រវត្តិរៀងរាល់សប្តាហ៍។',
+  'portal.weekly.none': 'មិនទាន់មានបុគ្គលិកណាមានកាលវិភាគប្រចាំសប្តាហ៍ទេ។',
+  'portal.weekly.set': 'កំណត់កាលវិភាគប្រចាំសប្តាហ៍',
+  'portal.weekly.setNote': 'ថ្ងៃដែលបានជ្រើសរើសនឹងជំនួសកាលវិភាគប្រចាំសប្តាហ៍ចាស់របស់បុគ្គលិកសម្រាប់ថ្ងៃទាំងនោះ។ ថ្ងៃផ្សេងទៀតមិនផ្លាស់ប្តូរទេ។',
+  'portal.weekly.workingDays': 'ថ្ងៃធ្វើការ',
+  'portal.weekly.startsOn': 'ចាប់ពីថ្ងៃ',
+  'portal.weekly.endsOn': 'រហូតដល់ថ្ងៃ',
+  'portal.weekly.endsOnHint': 'ទុកទទេ ប្រសិនបើគ្មានថ្ងៃបញ្ចប់',
+  'portal.weekly.until': 'រហូតដល់ {date}',
+  'portal.weekly.done': 'បានកំណត់កាលវិភាគសម្រាប់បុគ្គលិក {people} នាក់ និងបង្កើតវេន {shifts}។',
+  'portal.weekly.remove': 'បញ្ឈប់កាលវិភាគប្រចាំសប្តាហ៍',
+  'portal.weekly.removeNote': 'វេនខាងមុខដែលបង្កើតពីកាលវិភាគនេះនឹងត្រូវដកចេញ។ វេនដែលបានកត់វត្តមានរួចនៅរក្សាទុក។',
+  'portal.weekly.needTemplate': 'សូមបន្ថែមគំរូវេនជាមុនសិន (ឧទាហរណ៍ វេនព្រឹក 08:00–16:00)។',
 } as const;
 
 export type MessageKey = keyof typeof km;
