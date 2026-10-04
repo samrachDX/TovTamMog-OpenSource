@@ -52,7 +52,8 @@ for (const file of walk(join(__dirname, '..', 'src'))) {
   if (file.includes(`${join('lib', 'i18n')}`)) continue;
   const text = readFileSync(file, 'utf8');
   for (const m of text.matchAll(KEY_USE)) {
-    if (!(m[1] in kmDict)) problems.push(`unknown key "${m[1]}" used in ${file}`);
+    // A first argument without a dot is a locale ('en'), not a message key.
+    if (m[1].includes('.') && !(m[1] in kmDict)) problems.push(`unknown key "${m[1]}" used in ${file}`);
   }
 }
 

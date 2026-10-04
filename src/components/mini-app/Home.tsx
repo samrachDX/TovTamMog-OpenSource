@@ -2,6 +2,7 @@
 
 import { localHour, type MessageKey } from '@/lib/i18n';
 import { useI18n } from './i18n-context';
+import { FeedSection, type Feed } from './Feed';
 import { Button, LanguageSwitch, Notice } from './ui';
 
 export type Me = {
@@ -12,7 +13,9 @@ export type Me = {
     nameEn: string | null;
     category: { km: string; en: string };
     branches: { id: string; nameKm: string; nameEn: string; isPrimary: boolean }[];
+    notifyTelegram: boolean;
   };
+  feed: Feed;
   overview: {
     state: 'not_clocked_in' | 'clocked_in' | 'completed' | 'missed_clock_out' | 'absent' | 'pending_correction' | 'under_review';
     nextAction: 'clock_in' | 'clock_out' | null;
@@ -101,6 +104,8 @@ export function Home({ me, onClock }: { me: Me; onClock(action: 'clock_in' | 'cl
         ) : null}
         {overview.state === 'missed_clock_out' ? <Notice tone="warning">{t('errors.MISSED_CLOCK_OUT')}</Notice> : null}
       </section>
+
+      <FeedSection feed={me.feed} />
 
       {overview.nextAction ? (
         <div className="mt-auto flex flex-col gap-2">

@@ -5,7 +5,7 @@ import { UUID, uuid } from '@/lib/admin/actor';
 import {
   grantRole, issueEnrollmentCode, resetEmployeePin, revokeRole, setEmployeeStatus, unlinkTelegram,
 } from '@/lib/admin/employees';
-import { handle, json, portalActor, readJson } from '@/lib/http';
+import { flushOutbox, handle, json, portalActor, readJson } from '@/lib/http';
 
 /** Sensitive actions on one employee. Each checks its own permission and writes to the audit log. */
 export function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
@@ -25,6 +25,7 @@ export function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
         await unlinkTelegram(db, actor, id, body);
         return json({ ok: true });
       case 'pin_reset':
+        flushOutbox();
         await resetEmployeePin(db, actor, id, body);
         return json({ ok: true });
       case 'grant_role':

@@ -2,6 +2,7 @@ import { hash, verify } from '@node-rs/argon2';
 import type { Db } from '@/lib/db/types';
 import { AppError } from '@/lib/errors';
 import { recordAudit, recordSecurityEvent } from '@/lib/audit';
+import { notify } from '@/lib/notifications';
 import { hitRateLimit } from './rate-limit';
 
 export const PIN_LENGTH = 6;
@@ -178,5 +179,7 @@ export async function initiatePinReset(
       ip: args.ip,
       at: now,
     });
+    // So a reset nobody asked for does not go unnoticed.
+    await notify(tx, rows[0].org_id, [{ employeeId: args.employeeId, kind: 'pin_reset' }], now);
   });
 }

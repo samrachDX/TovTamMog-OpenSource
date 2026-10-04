@@ -16,6 +16,10 @@ const schema = z.object({
   PIN_SESSION_TTL_MINUTES: z.coerce.number().int().positive().default(720),
   /** Shared secret for the scheduled job endpoint. Vercel Cron sends it as a bearer token. */
   CRON_SECRET: z.string().min(16).optional(),
+  /** Secret Telegram echoes back in the X-Telegram-Bot-Api-Secret-Token header of webhook calls. */
+  TELEGRAM_WEBHOOK_SECRET: z.string().regex(/^[A-Za-z0-9_-]{16,256}$/).optional(),
+  /** Public URL of the app, used for the bot's "open app" button. */
+  APP_URL: z.string().url().optional(),
   /** Development only: pretend requests come from this IP. Ignored in production. */
   DEV_CLIENT_IP: z.string().optional(),
 });

@@ -2,7 +2,7 @@ import { db } from '@/lib/db';
 import { AppError } from '@/lib/errors';
 import { uuid } from '@/lib/admin/actor';
 import { cancelAssignment, publishAssignments } from '@/lib/admin/schedule';
-import { handle, json, portalActor, readJson } from '@/lib/http';
+import { flushOutbox, handle, json, portalActor, readJson } from '@/lib/http';
 
 export function POST(req: Request) {
   return handle(req, async () => {
@@ -10,6 +10,7 @@ export function POST(req: Request) {
     const body = await readJson(req);
     switch (body.type) {
       case 'publish':
+        flushOutbox();
         return json(await publishAssignments(db, actor, body));
       case 'cancel':
         await cancelAssignment(db, actor, uuid(body, 'id'), body);

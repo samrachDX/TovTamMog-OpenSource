@@ -1,6 +1,7 @@
 import type { Db } from '@/lib/db/types';
 import { AppError } from '@/lib/errors';
 import { recordAudit } from '@/lib/audit';
+import { dmy, notify } from '@/lib/notifications';
 import {
   bool, date, int, optUuid, reason, requireCan, text, time, uuid, uuidList, DATE, type Actor,
 } from './actor';
@@ -192,10 +193,14 @@ export async function publishAssignments(db: Db, actor: Actor, input: Input): Pr
   return db.tx(async (tx) => {
     const rows = await tx.query(
       `update shift_assignments set status = 'published', updated_at = $4
-       where branch_id = $1 and work_date between $2::date and $3::date and status = 'draft' returning id`,
+       where branch_id = $1 and work_date between $2::date and $3::date and status = 'draft' returning id, employee_id`,
       [branchId, from, to, now],
     );
     if (rows.length) {
+      const people = [...new Set((rows as { employee_id: string }[]).map((r) => r.employee_id))];
+      await notify(tx, actor.orgId, people.map((employeeId) => ({
+        employeeId, kind: 'schedule_published' as const, params: { from: dmy(from), to: dmy(to) }, data: { branchId, from, to },
+      })), now);
       await recordAudit(tx, {
         orgId: actor.orgId, actorEmployeeId: actor.employeeId, action: 'schedule.publish', entityType: 'branch',
         entityId: branchId, branchId, after: { from, to, published: rows.length }, ip: actor.ip, at: now,

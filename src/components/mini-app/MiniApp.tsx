@@ -5,9 +5,11 @@ import { ApiError, api, getToken, setToken } from '@/lib/client/api';
 import { telegram } from '@/lib/client/telegram';
 import type { Digits, Locale } from '@/lib/i18n';
 import { ClockFlow } from './ClockFlow';
+import { EventPopup } from './Feed';
 import { History } from './History';
 import { Home, type Me } from './Home';
 import { I18nProvider, useI18n } from './i18n-context';
+import { Notifications } from './Notifications';
 import { PinPad } from './PinPad';
 import { RequestForm, type RecordRef, type RequestKind } from './RequestForm';
 import { Requests } from './Requests';
@@ -24,7 +26,7 @@ type Phase =
   | { name: 'clocking'; me: Me; action: 'clock_in' | 'clock_out' }
   | { name: 'error'; message: string };
 
-type Tab = 'home' | 'history' | 'requests';
+type Tab = 'home' | 'history' | 'requests' | 'inbox';
 
 type AuthResponse = { state: 'not_enrolled' | 'pin_setup' | 'pin_required' | 'ready'; token?: string };
 type MeResponse =
@@ -245,7 +247,14 @@ function Flow() {
           {tab === 'home' ? <Home me={me} onClock={(action) => setPhase({ name: 'clocking', me, action })} /> : null}
           {tab === 'history' ? <History onRequest={(kind, record) => setPhase({ name: 'request', me, back: 'history', kind, record })} /> : null}
           {tab === 'requests' ? <Requests onNew={(kind) => setPhase({ name: 'request', me, back: 'requests', kind })} /> : null}
-          <TabBar tab={tab} onChange={go} />
+          {tab === 'inbox' ? (
+            <Notifications
+              notifyTelegram={me.profile.notifyTelegram}
+              onRead={() => setPhase((p) => (p.name === 'ready' ? { ...p, me: { ...p.me, feed: { ...p.me.feed, unread: 0 } } } : p))}
+            />
+          ) : null}
+          {tab === 'home' ? <EventPopup events={me.feed.popups} /> : null}
+          <TabBar tab={tab} unread={me.feed.unread} onChange={go} />
         </Screen>
       );
     }
@@ -276,9 +285,11 @@ function Flow() {
   }
 }
 
-function TabBar({ tab, onChange }: { tab: Tab; onChange(tab: Tab): void }) {
-  const { t } = useI18n();
-  const items: [Tab, string][] = [['home', t('nav.attendance')], ['history', t('nav.history')], ['requests', t('requests.title')]];
+function TabBar({ tab, unread, onChange }: { tab: Tab; unread: number; onChange(tab: Tab): void }) {
+  const { t, num } = useI18n();
+  const items: [Tab, string][] = [
+    ['home', t('nav.attendance')], ['history', t('nav.history')], ['requests', t('requests.title')], ['inbox', t('notifications.short')],
+  ];
   return (
     <>
       {/* Keeps page content clear of the fixed bar. */}
@@ -287,7 +298,7 @@ function TabBar({ tab, onChange }: { tab: Tab; onChange(tab: Tab): void }) {
         aria-label={t('portal.nav')}
         className="fixed inset-x-0 bottom-0 border-t border-line bg-surface pb-[env(safe-area-inset-bottom)]"
       >
-        <ul className="mx-auto grid max-w-md grid-cols-3">
+        <ul className="mx-auto grid max-w-md grid-cols-4">
           {items.map(([key, label]) => (
             <li key={key}>
               <button
@@ -299,6 +310,11 @@ function TabBar({ tab, onChange }: { tab: Tab; onChange(tab: Tab): void }) {
                 }`}
               >
                 {label}
+                {key === 'inbox' && unread > 0 ? (
+                  <span className="ml-1 inline-block min-w-5 rounded-full bg-danger px-1 text-xs font-semibold text-white" aria-label={t('notifications.unreadCount', { count: unread })}>
+                    {num(unread > 99 ? '99+' : unread)}
+                  </span>
+                ) : null}
               </button>
             </li>
           ))}

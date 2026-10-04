@@ -45,6 +45,7 @@ const NAV: { href: string; label: MessageKey; permission: string }[] = [
   { href: '/hr/schedule', label: 'nav.schedule', permission: 'schedule.view' },
   { href: '/hr/attendance', label: 'nav.attendance', permission: 'attendance.view' },
   { href: '/hr/requests', label: 'nav.requests', permission: 'request.review' },
+  { href: '/admin/events', label: 'nav.events', permission: 'event.create' },
   { href: '/admin/branches', label: 'nav.branches', permission: 'branch.view' },
   { href: '/admin/audit', label: 'nav.audit', permission: 'audit.view' },
 ];

@@ -2,6 +2,7 @@ import type { Db } from '@/lib/db/types';
 import { AppError } from '@/lib/errors';
 import { localDate } from '@/lib/i18n';
 import { countPendingRequests } from '@/lib/requests';
+import { upcomingEvents } from './events';
 import { date, oneOf, optText, optUuid, paging, requireCan, scopeOf, type Actor } from './actor';
 
 type Input = Record<string, unknown>;
@@ -125,7 +126,11 @@ export async function getDashboard(db: Db, actor: Actor, filter: Input = {}) {
          where sa.branch_id = b.id and sa.work_date = $3::date and sa.status = 'published' and sa.end_at <= $4::timestamptz
            and not exists (select 1 from attendance_records r where r.shift_assignment_id = sa.id)
            and not exists (select 1 from employee_requests q where q.employee_id = sa.employee_id and q.type = 'leave'
-                             and q.status = 'approved' and sa.work_date between q.start_date and q.end_date))
+                             and q.status = 'approved' and sa.work_date between q.start_date and q.end_date)
+           and not exists (select 1 from events ev where ev.org_id = b.org_id and ev.status = 'published' and ev.non_working
+                             and sa.work_date between ev.starts_on and ev.ends_on
+                             and (not exists (select 1 from event_branches t where t.event_id = ev.id)
+                                  or exists (select 1 from event_branches t where t.event_id = ev.id and t.branch_id = b.id))))
        + (select count(*)::int from attendance_records r
          where r.branch_id = b.id and r.work_date = $3::date and r.status = 'absent') as absent,
        (select count(*)::int from attendance_records r
@@ -147,6 +152,7 @@ export async function getDashboard(db: Db, actor: Actor, filter: Input = {}) {
     date: day,
     generatedAt: now,
     pendingRequests: await countPendingRequests(db, actor),
+    upcomingEvents: await upcomingEvents(db, actor, day),
     totals: {
       activeEmployees: n, scheduled: sum('scheduled'), clockedIn: sum('clockedIn'), late: sum('late'),
       absent: sum('absent'), missedClockOut: sum('missedClockOut'),

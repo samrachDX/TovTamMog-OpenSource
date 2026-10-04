@@ -1,6 +1,8 @@
 import type { Db } from '@/lib/db/types';
 import { AppError } from '@/lib/errors';
 import { recordAudit } from '@/lib/audit';
+import { branchRecipients, notify } from '@/lib/notifications';
+import { t, type MessageKey } from '@/lib/i18n';
 import { can } from '@/lib/auth/permissions';
 import { earlyLeaveMinutes, lateMinutes } from '@/lib/attendance/engine';
 import { DATE, TIME, date, oneOf, optText, optUuid, paging, requireCan, scopeOf, text, uuid, type Actor } from '@/lib/admin/actor';
@@ -129,6 +131,18 @@ export async function createRequest(db: Db, who: { employeeId: string; orgId: st
     await tx.query(`insert into request_events (request_id, actor_employee_id, action, note, created_at) values ($1, $2, 'submitted', $3, $4)`, [
       id, who.employeeId, why, now,
     ]);
+
+    // Tell the people configured for this employee's branches (never the requester).
+    const branches = await tx.query<{ branch_id: string }>(`select branch_id from employee_branches where employee_id = $1`, [who.employeeId]);
+    const me = await tx.query<{ name_km: string; name_en: string | null }>(`select name_km, name_en from employees where id = $1`, [who.employeeId]);
+    const recipients = await branchRecipients(tx, branches.map((b) => b.branch_id), [who.employeeId]);
+    await notify(tx, who.orgId, recipients.map((employeeId) => ({
+      employeeId, kind: 'request_submitted' as const, data: { requestId: id },
+      params: (locale) => ({
+        name: locale === 'km-KH' ? me[0].name_km : me[0].name_en || me[0].name_km,
+        type: t(locale, `requests.type.${type}` as MessageKey),
+      }),
+    })), now);
     return { id };
   });
 }
@@ -383,6 +397,10 @@ export async function decideRequest(db: Db, actor: Actor, id: string, input: Inp
     await tx.query(`insert into request_events (request_id, actor_employee_id, action, note, created_at) values ($1, $2, $3, $4, $5)`, [
       id, actor.employeeId, decision, note, now,
     ]);
+    await notify(tx, actor.orgId, [{
+      employeeId: req.employee_id, kind: decision === 'approved' ? 'request_approved' : 'request_rejected', data: { requestId: id },
+      params: (locale) => ({ type: t(locale, `requests.type.${req.type}` as MessageKey), note: note ?? '—' }),
+    }], now);
     await recordAudit(tx, {
       orgId: actor.orgId, actorEmployeeId: actor.employeeId, action: `request.${decision}`, entityType: 'employee_request',
       entityId: id, after: { type: req.type, employeeId: req.employee_id }, reason: note, ip: actor.ip, at: now,

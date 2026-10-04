@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { db } from '@/lib/db';
 import { env } from '@/lib/env';
 import { runAttendanceMaintenance } from '@/lib/attendance/maintenance';
+import { deliverOutbox, telegramSender } from '@/lib/telegram/bot';
 
 /**
  * Scheduled attendance processing: missed clock-outs, absences, cleanup.
@@ -16,7 +17,10 @@ export async function GET(req: Request) {
     return Response.json({ error: 'unauthorized' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
   }
   try {
-    return Response.json({ ok: true, ...(await runAttendanceMaintenance(db)) }, { headers: { 'Cache-Control': 'no-store' } });
+    const maintenance = await runAttendanceMaintenance(db);
+    // Also sends anything still queued, including the notices the step above just created.
+    const telegram = await deliverOutbox(db, telegramSender(env().TELEGRAM_BOT_TOKEN), { limit: 200 });
+    return Response.json({ ok: true, ...maintenance, telegram }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err) {
     console.error('[cron] attendance-check failed', err);
     return Response.json({ ok: false }, { status: 500, headers: { 'Cache-Control': 'no-store' } });

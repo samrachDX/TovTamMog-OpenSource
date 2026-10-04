@@ -64,6 +64,7 @@ export const ERROR_CODES = [
   'INVALID_CORRECTION',
   'CANNOT_REVIEW_OWN',
   'DATE_RANGE_INVALID',
+  'EVENT_NOT_DRAFT',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

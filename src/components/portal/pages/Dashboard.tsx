@@ -11,7 +11,8 @@ type Row = {
   branchId: string; nameKm: string; nameEn: string; activeEmployees: number; scheduled: number;
   clockedIn: number; late: number; absent: number; missedClockOut: number;
 };
-type Data = { date: string; generatedAt: string; pendingRequests: number; totals: Omit<Row, 'branchId' | 'nameKm' | 'nameEn'>; branches: Row[] };
+type Upcoming = { id: string; type: 'event' | 'holiday'; titleKm: string; titleEn: string | null; startsOn: string; endsOn: string };
+type Data = { date: string; generatedAt: string; pendingRequests: number; upcomingEvents: Upcoming[]; totals: Omit<Row, 'branchId' | 'nameKm' | 'nameEn'>; branches: Row[] };
 
 export function Dashboard() {
   const { t, locale, num, day, time } = useI18n();
@@ -69,6 +70,18 @@ export function Dashboard() {
             <Card title={t('portal.dash.byBranch')}>
               <DataTable rows={d.branches} columns={columns} rowKey={(r) => r.branchId} empty={t('portal.empty')} />
             </Card>
+            {d.upcomingEvents.length ? (
+              <Card title={t('events.upcoming')}>
+                <ul className="flex flex-col gap-1.5 text-sm">
+                  {d.upcomingEvents.map((e) => (
+                    <li key={e.id} className="flex flex-wrap justify-between gap-2">
+                      <span>{name({ nameKm: e.titleKm, nameEn: e.titleEn })} <span className="text-muted">· {t(`events.type.${e.type}`)}</span></span>
+                      <span className="tabular-nums text-muted">{e.endsOn !== e.startsOn ? `${day(e.startsOn)} – ${day(e.endsOn)}` : day(e.startsOn)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </Card>
+            ) : null}
           </div>
         )}
       </LoadState>

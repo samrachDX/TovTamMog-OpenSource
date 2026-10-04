@@ -11,7 +11,8 @@
     "check:i18n": "tsx scripts/check-i18n.ts",
     "test": "vitest run",
     "db:migrate": "tsx scripts/migrate.ts",
-    "bootstrap": "tsx scripts/bootstrap.ts"
+    "bootstrap": "tsx scripts/bootstrap.ts",
+    "bot:setup": "tsx scripts/set-webhook.ts"
   },
   "dependencies": {
     "@fontsource-variable/noto-sans-khmer": "^5.3.0",

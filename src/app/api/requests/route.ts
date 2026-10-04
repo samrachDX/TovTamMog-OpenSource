@@ -1,6 +1,6 @@
 import { db } from '@/lib/db';
 import { createRequest, listMyRequests } from '@/lib/requests';
-import { employeeFrom, handle, json, queryInput, readJson } from '@/lib/http';
+import { employeeFrom, flushOutbox, handle, json, queryInput, readJson } from '@/lib/http';
 
 export function GET(req: Request) {
   return handle(req, async () => {
@@ -12,6 +12,7 @@ export function GET(req: Request) {
 export function POST(req: Request) {
   return handle(req, async () => {
     const session = await employeeFrom(req, 'request.create');
+    flushOutbox();
     return json(await createRequest(db, { employeeId: session.employeeId, orgId: session.orgId }, await readJson(req)), 201);
   });
 }

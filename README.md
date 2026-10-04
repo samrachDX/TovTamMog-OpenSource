@@ -35,11 +35,21 @@ Built and tested:
 - Scheduled job (`/api/internal/attendance-check`, see `vercel.json`): flags missed
   clock-outs and records absences for unattended shifts not covered by approved leave.
 - Attendance CSV export (logged in the audit trail).
+- Events, holidays and announcements (`/admin/events`): Khmer-first authoring with
+  optional English, templates, branch targeting, drafts and publishing, popups shown once
+  per person, an optional celebration animation, and non-working holidays that suppress
+  absences. The employee home shows upcoming events and current announcements.
+- Notifications: an in-app inbox with unread badge, plus Telegram messages for request
+  decisions, new requests (to each branch's chosen recipients), published schedules,
+  missed clock-outs, recorded absences, PIN resets and published events. Messages use
+  each person's language; anyone can switch Telegram messages off.
+- Telegram bot: verified webhook (`/api/internal/telegram-webhook`) answering /start
+  with a button that opens the app; an outbox with retries and backoff.
 - Khmer/English dictionaries with a completeness check that runs in every build.
 
-Not built yet: events/holidays/announcements and popups, Telegram bot notifications and
-webhook, employee import/export, file uploads (photos, logos), editing shift templates,
-second-approver flow for high-risk changes.
+Not built yet: employee import/export, file uploads (photos, logos, event images),
+editing shift templates, second-approver flow for high-risk changes, leave types and
+balances, scheduled (future-dated) publishing of events.
 
 ## Setup
 
@@ -50,7 +60,9 @@ second-approver flow for high-risk changes.
    administrator, and prints an enrollment code and the branch QR content. The
    arguments are listed at the top of `scripts/bootstrap.ts`.
 5. In @BotFather set the bot's Mini App URL to the deployed domain.
-6. `npm run dev`
+6. Set `TELEGRAM_WEBHOOK_SECRET` and `APP_URL`, deploy, then run `npm run bot:setup` once to
+   register the webhook, the menu button and the /start command.
+7. `npm run dev`
 
 ## Commands
 
@@ -99,6 +111,10 @@ append-only (trigger-enforced).
   what Vercel's Hobby plan allows. On Pro, change the schedule to every 15 minutes so
   absences and missed clock-outs appear sooner. The dashboard already counts absences
   live, and an overdue open shift is also flagged the next time that person scans.
+- **Telegram delivery.** The bot can only message people who have opened it at least once.
+  Messages are sent right after the action that caused them and retried by the scheduled
+  job; with the job running once a day, a message that failed the first time can be late.
+  If someone blocks the bot they stop getting messages but still see everything in the app.
 - **Khmer wording** in `src/lib/i18n/km.ts` needs review by a fluent Khmer speaker before
   production, including the Khmer spelling of the app name.
 

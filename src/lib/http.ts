@@ -1,9 +1,11 @@
 import 'server-only';
+import { after } from 'next/server';
 import { db } from '@/lib/db';
 import { env } from '@/lib/env';
 import { AppError, errorMessageKey, type ErrorCode } from '@/lib/errors';
 import { resolveLocale, t, type Locale } from '@/lib/i18n';
 import { parseIp } from '@/lib/attendance/ip';
+import { deliverOutbox, telegramSender } from '@/lib/telegram/bot';
 import { getSession, requirePin, type AuthConfig, type Session } from '@/lib/auth/session';
 import { hasPortalAccess, loadActor, type Actor } from '@/lib/admin/actor';
 import { requirePermission, type Permission } from '@/lib/auth/permissions';
@@ -103,6 +105,20 @@ export function queryInput(req: Request): Record<string, unknown> {
     out[k] = k === 'limit' || k === 'offset' ? Number(v) : v;
   }
   return out;
+}
+
+/**
+ * Sends queued bot messages once the response has gone out, so nobody waits on
+ * Telegram. Anything not delivered here is picked up by the scheduled job.
+ */
+export function flushOutbox(): void {
+  after(async () => {
+    try {
+      await deliverOutbox(db, telegramSender(env().TELEGRAM_BOT_TOKEN));
+    } catch (err) {
+      console.error('[telegram] outbox delivery failed', err instanceof Error ? err.message : err);
+    }
+  });
 }
 
 /** Wraps a route handler: translated errors for the user, details only in server logs. */

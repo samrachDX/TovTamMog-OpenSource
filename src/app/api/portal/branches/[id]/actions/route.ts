@@ -1,10 +1,10 @@
 import { db } from '@/lib/db';
 import { AppError } from '@/lib/errors';
 import { UUID, uuid } from '@/lib/admin/actor';
-import { addAllowlistEntry, removeAllowlistEntry, rotateQr, updateBranchSecurity } from '@/lib/admin/branches';
+import { addAllowlistEntry, removeAllowlistEntry, rotateQr, setBranchRecipients, updateBranchSecurity } from '@/lib/admin/branches';
 import { handle, json, portalActor, readJson } from '@/lib/http';
 
-/** Security settings of one branch. All need `security.settings.manage` and a reason. */
+/** Security settings (need `security.settings.manage` and a reason) and notification recipients. */
 export function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   return handle(req, async () => {
     const actor = await portalActor(req);
@@ -19,6 +19,9 @@ export function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
         return json(await addAllowlistEntry(db, actor, id, body));
       case 'allowlist_remove':
         await removeAllowlistEntry(db, actor, id, uuid(body, 'entryId'), body);
+        return json({ ok: true });
+      case 'recipients':
+        await setBranchRecipients(db, actor, id, body);
         return json({ ok: true });
       case 'qr':
         return json(await rotateQr(db, actor, id, body));

@@ -5,7 +5,7 @@ import { newQrPublicId } from '@/lib/auth/crypto';
 import { ipAllowed, normalizeCidr } from '@/lib/attendance/ip';
 import { can } from '@/lib/auth/permissions';
 import {
-  bool, int, isUniqueViolation, num, oneOf, optText, optUuid, reason, requireCan, scopeOf, text, type Actor,
+  bool, int, isUniqueViolation, num, oneOf, optText, optUuid, reason, requireCan, scopeOf, text, uuidList, type Actor,
 } from './actor';
 
 type Input = Record<string, unknown>;
@@ -74,8 +74,15 @@ export async function getBranch(db: Db, actor: Actor, id: string) {
     `select id, cidr, label, created_at as "createdAt" from branch_ip_allowlist where branch_id = $1 order by created_at`,
     [id],
   );
+  const recipients = await db.query<{ id: string; employeeCode: string; nameKm: string; nameEn: string | null }>(
+    `select e.id, e.employee_code as "employeeCode", e.name_km as "nameKm", e.name_en as "nameEn"
+     from branch_notification_recipients r join employees e on e.id = r.employee_id
+     where r.branch_id = $1 order by e.employee_code`,
+    [id],
+  );
   return {
     ...shape(row),
+    recipients,
     qr: qr[0] ? { publicId: qr[0].public_id, createdAt: qr[0].created_at } : null,
     allowlist,
     // The actor's own address, so they can check it against the allowlist from the branch network.
@@ -282,5 +289,24 @@ export async function rotateQr(db: Db, actor: Actor, id: string, input: Input): 
       after: { publicIdPrefix: publicId?.slice(0, 4) ?? null }, reason: why, ip: actor.ip, at: now,
     });
     return { publicId };
+  });
+}
+
+/** Replaces the list of people who are told about activity at this branch (new requests). */
+export async function setBranchRecipients(db: Db, actor: Actor, id: string, input: Input): Promise<void> {
+  requireCan(actor, 'branch.manage', id);
+  const employeeIds = uuidList(input, 'employeeIds', { max: 20 });
+  await db.tx(async (tx) => {
+    await load(tx, actor, id, true);
+    const ok = await tx.query(`select 1 from employees where org_id = $1 and status = 'active' and id = any($2::uuid[])`, [actor.orgId, employeeIds]);
+    if (ok.length !== employeeIds.length) throw new AppError('VALIDATION', { field: 'employeeIds' });
+    const before = await tx.query<{ employee_id: string }>(`delete from branch_notification_recipients where branch_id = $1 returning employee_id`, [id]);
+    for (const e of employeeIds) {
+      await tx.query(`insert into branch_notification_recipients (branch_id, employee_id, created_by) values ($1, $2, $3)`, [id, e, actor.employeeId]);
+    }
+    await recordAudit(tx, {
+      orgId: actor.orgId, actorEmployeeId: actor.employeeId, action: 'branch.recipients.update', entityType: 'branch',
+      entityId: id, branchId: id, before: before.map((b) => b.employee_id), after: employeeIds, ip: actor.ip, at: actor.now,
+    });
   });
 }
