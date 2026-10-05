@@ -643,4 +643,12 @@ export const en: Record<MessageKey, string> = {
   'portal.emp.schedule.set': 'Set a weekly schedule now',
   'portal.emp.schedule.hint': 'Shifts are created and published from the start date, at the primary branch.',
   'portal.emp.schedule.failed': 'The employee was added, but the weekly schedule was not set: {error}',
+
+  // ---- QR poster ----
+  'portal.branch.qrPng': 'Download image',
+  'portal.branch.qrPdf': 'Download PDF',
+  'portal.branch.qrA6': 'A6 poster (105 × 148 mm), ready to print.',
+  'qrPoster.title': 'Scan to clock in and out',
+  'qrPoster.code': 'Branch code {code}',
+  'qrPoster.footer': 'Attendance',
 };

@@ -6,6 +6,7 @@ import QRCode from 'qrcode';
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/client/api';
 import { qrPayload } from '@/lib/attendance/qr';
+import { downloadQrPoster, renderQrPoster } from '@/lib/client/qr-poster';
 import { useI18n } from '@/components/mini-app/i18n-context';
 import { EmployeePicker } from '../EmployeePicker';
 import { usePortal } from '../PortalShell';
@@ -368,23 +369,37 @@ function QrCard({ b, reload }: CardProps) {
     return () => { live = false; };
   }, [publicId]);
 
-  const print = () => {
-    const w = window.open('', '_blank', 'width=480,height=640');
+  const [making, setMaking] = useState<'png' | 'pdf' | 'print' | null>(null);
+  const poster = () => ({ payload: qrPayload(window.location.origin + '/', publicId!), nameKm: b.nameKm, nameEn: b.nameEn, code: b.code });
+  const download = async (format: 'png' | 'pdf') => {
+    setMaking(format);
+    try {
+      await downloadQrPoster(poster(), format);
+    } finally {
+      setMaking(null);
+    }
+  };
+  /** Prints the same A6 poster the downloads produce, one per page. */
+  const print = async () => {
+    const w = window.open('', '_blank', 'width=480,height=680');
     if (!w) return;
-    const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
-    w.document.write(`<!doctype html><html lang="km"><head><meta charset="utf-8"><title>${esc(b.code)}</title>
-      <style>body{font-family:"Lexend","Kantumruy Pro","Khmer OS Battambang",sans-serif;text-align:center;padding:24px;color:#243b53;line-height:1.7}
-      svg{width:320px;height:320px}h1{font-size:28px;margin:12px 0 0}p{font-size:18px;margin:4px 0}img{height:44px}</style></head>
-      <body><img src="${window.location.origin}/brand/logo-long.png" alt="TovTamMog"><h1>${esc(b.nameKm)}</h1><p>${esc(b.nameEn)}</p>${svg}<p>${esc(t('attendance.scanPopup'))}</p></body></html>`);
-    w.document.close();
-    w.focus();
-    // Wait for the logo, or it prints as an empty box.
-    const logo = w.document.querySelector('img');
-    const go = () => w.print();
-    if (logo && !logo.complete) {
-      logo.addEventListener('load', go, { once: true });
-      logo.addEventListener('error', go, { once: true });
-    } else go();
+    setMaking('print');
+    try {
+      const url = (await renderQrPoster(poster())).toDataURL('image/png');
+      w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${b.code.replace(/[&<>"]/g, '')}</title>
+        <style>@page{size:A6 portrait;margin:0}html,body{margin:0}img{display:block;width:105mm;height:148mm}</style></head>
+        <body><img src="${url}" alt=""></body></html>`);
+      w.document.close();
+      w.focus();
+      const img = w.document.querySelector('img');
+      const go = () => w.print();
+      if (img && !img.complete) img.addEventListener('load', go, { once: true });
+      else go();
+    } catch {
+      w.close();
+    } finally {
+      setMaking(null);
+    }
   };
 
   return (
@@ -400,7 +415,16 @@ function QrCard({ b, reload }: CardProps) {
           />
           <div className="flex flex-col items-start gap-2 text-sm">
             <span className="text-muted">{t('portal.branch.qrCreated', { at: dateTime(b.qr.createdAt) })}</span>
-            <SmallButton tone="primary" onClick={print}>{t('portal.branch.qrPrint')}</SmallButton>
+            <div className="flex flex-wrap gap-2">
+              <SmallButton tone="primary" disabled={making !== null} onClick={() => void print()}>{t('portal.branch.qrPrint')}</SmallButton>
+              <SmallButton disabled={making !== null} onClick={() => void download('png')}>
+                {making === 'png' ? t('common.loading') : t('portal.branch.qrPng')}
+              </SmallButton>
+              <SmallButton disabled={making !== null} onClick={() => void download('pdf')}>
+                {making === 'pdf' ? t('common.loading') : t('portal.branch.qrPdf')}
+              </SmallButton>
+            </div>
+            <span className="text-xs text-muted">{t('portal.branch.qrA6')}</span>
             {b.canManageSecurity ? (
               <>
                 <SmallButton tone="danger" onClick={() => setPending('regenerate')}>{t('portal.branch.qrRegenerate')}</SmallButton>

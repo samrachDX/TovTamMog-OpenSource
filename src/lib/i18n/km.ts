@@ -642,6 +642,14 @@ export const km = {
   'portal.emp.schedule.set': 'កំណត់កាលវិភាគប្រចាំសប្តាហ៍ឥឡូវនេះ',
   'portal.emp.schedule.hint': 'វេនត្រូវបង្កើត និងផ្សព្វផ្សាយចាប់ពីថ្ងៃចាប់ផ្តើម នៅសាខាចម្បង។',
   'portal.emp.schedule.failed': 'បានបន្ថែមបុគ្គលិករួចហើយ ប៉ុន្តែមិនទាន់កំណត់កាលវិភាគប្រចាំសប្តាហ៍បានទេ៖ {error}',
+
+  // ---- QR poster ----
+  'portal.branch.qrPng': 'ទាញយករូបភាព',
+  'portal.branch.qrPdf': 'ទាញយក PDF',
+  'portal.branch.qrA6': 'ផ្ទាំងទំហំ A6 (105 × 148 មម) រួចរាល់សម្រាប់បោះពុម្ព។',
+  'qrPoster.title': 'ស្កេនដើម្បីចុះវត្តមាន ចូល និងចេញ',
+  'qrPoster.code': 'លេខកូដសាខា {code}',
+  'qrPoster.footer': 'វត្តមានបុគ្គលិក',
 } as const;
 
 export type MessageKey = keyof typeof km;

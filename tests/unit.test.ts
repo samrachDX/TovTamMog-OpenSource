@@ -234,3 +234,20 @@ describe('i18n', () => {
     expect(formatLongDate(d, { locale: 'en' })).toMatch(/^Monday,? 5 October 2026$/);
   });
 });
+
+describe('jpegToPdf', () => {
+  it('builds a one-page PDF with a correct cross-reference table', async () => {
+    const { jpegToPdf } = await import('@/lib/client/pdf');
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 0xff, 0xd9]);
+    const pdf = jpegToPdf(jpeg, { width: 2, height: 3 }, { width: 297.64, height: 419.53 });
+    const text = new TextDecoder('latin1').decode(pdf);
+    expect(text.startsWith('%PDF-1.4')).toBe(true);
+    expect(text).toContain('/MediaBox [0 0 297.64 419.53]');
+    const xref = Number(text.match(/startxref\n(\d+)/)![1]);
+    expect(text.slice(xref, xref + 4)).toBe('xref');
+    // Every listed offset points at its object.
+    const offsets = [...text.slice(xref).matchAll(/^(\d{10}) 00000 n $/gm)].map((m) => Number(m[1]));
+    expect(offsets).toHaveLength(5);
+    offsets.forEach((o, i) => expect(text.slice(o, o + `${i + 1} 0 obj`.length)).toBe(`${i + 1} 0 obj`));
+  });
+});
