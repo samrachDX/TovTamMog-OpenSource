@@ -5,6 +5,7 @@ import { ApiError, api, getToken, setToken } from '@/lib/client/api';
 import { telegram } from '@/lib/client/telegram';
 import type { Digits, Locale } from '@/lib/i18n';
 import { Brand } from '@/components/Brand';
+import { NavIcon } from '@/components/NavIcon';
 import { ClockFlow } from './ClockFlow';
 import { EventPopup } from './Feed';
 import { History } from './History';
@@ -301,7 +302,7 @@ function TabBar({ tab, unread, onChange }: { tab: Tab; unread: number; onChange(
       <div aria-hidden="true" className="h-16 shrink-0" />
       <nav
         aria-label={t('portal.nav')}
-        className="fixed inset-x-0 bottom-0 border-t border-line bg-surface pb-[env(safe-area-inset-bottom)]"
+        className="fixed inset-x-0 bottom-0 z-10 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur"
       >
         <ul className="mx-auto grid max-w-md grid-cols-4">
           {items.map(([key, label]) => (
@@ -310,16 +311,23 @@ function TabBar({ tab, unread, onChange }: { tab: Tab; unread: number; onChange(
                 type="button"
                 aria-current={tab === key ? 'page' : undefined}
                 onClick={() => onChange(key)}
-                className={`pressable min-h-14 w-full border-t-2 px-0.5 text-[13px] leading-tight whitespace-nowrap ${
-                  tab === key ? 'border-primary-strong font-semibold text-ink' : 'border-transparent text-muted'
+                className={`pressable flex min-h-16 w-full flex-col items-center justify-center gap-0.5 px-0.5 text-xs leading-tight whitespace-nowrap ${
+                  tab === key ? 'font-semibold text-ink' : 'text-muted'
                 }`}
               >
+                {/* The active tab's icon sits in a light-blue pill; the label stays dark for contrast. */}
+                <span className={`relative rounded-full px-4 py-0.5 ${tab === key ? 'bg-pale text-primary-strong' : ''}`}>
+                  <NavIcon name={key} className="size-6" />
+                  {key === 'inbox' && unread > 0 ? (
+                    <span
+                      className="absolute -top-1 left-7 min-w-5 rounded-full bg-danger px-1 text-center text-[11px] leading-5 font-semibold text-white"
+                      aria-label={t('notifications.unreadCount', { count: unread })}
+                    >
+                      {num(unread > 99 ? '99+' : unread)}
+                    </span>
+                  ) : null}
+                </span>
                 {label}
-                {key === 'inbox' && unread > 0 ? (
-                  <span className="ml-1 inline-block min-w-5 rounded-full bg-danger px-1 text-xs font-semibold text-white" aria-label={t('notifications.unreadCount', { count: unread })}>
-                    {num(unread > 99 ? '99+' : unread)}
-                  </span>
-                ) : null}
               </button>
             </li>
           ))}

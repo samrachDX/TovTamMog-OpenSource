@@ -3,10 +3,12 @@ import Script from 'next/script';
 import '@fontsource-variable/lexend';
 import '@fontsource-variable/kantumruy-pro';
 import './globals.css';
+import { BRAND_NAME } from '@/components/Brand';
 import { DEFAULT_LOCALE, t } from '@/lib/i18n';
 
 export const metadata: Metadata = {
-  title: t(DEFAULT_LOCALE, 'app.name'),
+  // The browser tab always shows the English name, matching the wordmark.
+  title: BRAND_NAME,
   description: t(DEFAULT_LOCALE, 'app.tagline'),
   robots: { index: false, follow: false },
 };

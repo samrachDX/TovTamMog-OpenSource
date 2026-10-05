@@ -7,6 +7,7 @@ import { ApiError, api, getToken, setToken, signOut } from '@/lib/client/api';
 import { telegram } from '@/lib/client/telegram';
 import type { Digits, Locale, MessageKey } from '@/lib/i18n';
 import { Brand } from '@/components/Brand';
+import { NavIcon, type NavIconName } from '@/components/NavIcon';
 import { I18nProvider, useI18n } from '@/components/mini-app/i18n-context';
 import { PinPad } from '@/components/mini-app/PinPad';
 import { Button, Header, LanguageSwitch, Notice, Screen, Spinner } from '@/components/mini-app/ui';
@@ -41,16 +42,16 @@ export function usePortal(): Portal {
   return ctx;
 }
 
-const NAV: { href: string; label: MessageKey; permission: string }[] = [
-  { href: '/admin', label: 'nav.dashboard', permission: 'attendance.view' },
-  { href: '/hr/employees', label: 'nav.employees', permission: 'employee.view' },
-  { href: '/hr/schedule', label: 'nav.schedule', permission: 'schedule.view' },
-  { href: '/hr/attendance', label: 'nav.attendance', permission: 'attendance.view' },
-  { href: '/hr/requests', label: 'nav.requests', permission: 'request.review' },
-  { href: '/admin/events', label: 'nav.events', permission: 'event.create' },
-  { href: '/admin/branches', label: 'nav.branches', permission: 'branch.view' },
-  { href: '/admin/roles', label: 'nav.roles', permission: 'role.manage' },
-  { href: '/admin/audit', label: 'nav.audit', permission: 'audit.view' },
+const NAV: { href: string; label: MessageKey; icon: NavIconName; permission: string }[] = [
+  { href: '/admin', label: 'nav.dashboard', icon: 'dashboard', permission: 'attendance.view' },
+  { href: '/hr/employees', label: 'nav.employees', icon: 'employees', permission: 'employee.view' },
+  { href: '/hr/schedule', label: 'nav.schedule', icon: 'schedule', permission: 'schedule.view' },
+  { href: '/hr/attendance', label: 'nav.attendance', icon: 'attendance', permission: 'attendance.view' },
+  { href: '/hr/requests', label: 'nav.requests', icon: 'requests', permission: 'request.review' },
+  { href: '/admin/events', label: 'nav.events', icon: 'events', permission: 'event.create' },
+  { href: '/admin/branches', label: 'nav.branches', icon: 'branches', permission: 'branch.view' },
+  { href: '/admin/roles', label: 'nav.roles', icon: 'roles', permission: 'role.manage' },
+  { href: '/admin/audit', label: 'nav.audit', icon: 'audit', permission: 'audit.view' },
 ];
 
 export function PortalShell({ children }: { children: ReactNode }) {
@@ -275,10 +276,17 @@ function Frame({ me, children, onSignOut }: { me: PortalMe; children: ReactNode;
   const links = NAV.filter((n) => portal.can(n.permission) && (n.permission !== 'audit.view' || portal.canOrg('audit.view')));
   const active = (href: string) => (href === '/admin' ? pathname === '/admin' : pathname.startsWith(href));
 
+  // On phones the nav scrolls sideways; bring the current page's link into view.
+  const navRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    navRef.current?.querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [pathname]);
+
   return (
     <Ctx.Provider value={portal}>
       <div className="min-h-dvh bg-[#f6f9fc]">
-        <header className="border-b border-line bg-surface">
+        {/* Header and navigation stay pinned to the top while the page scrolls. */}
+        <header className="sticky top-0 z-30 border-b border-line bg-surface/95 backdrop-blur">
           <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-2">
             <Link href="/admin" aria-label={t('nav.dashboard')} className="flex items-center">
               {/* The icon alone on phones, where the header is crowded; the full logo otherwise. */}
@@ -293,17 +301,18 @@ function Frame({ me, children, onSignOut }: { me: PortalMe; children: ReactNode;
               </button>
             </div>
           </div>
-          <nav aria-label={t('portal.nav')} className="mx-auto max-w-6xl overflow-x-auto px-2">
-            <ul className="flex gap-1">
+          <nav ref={navRef} aria-label={t('portal.nav')} className="mx-auto max-w-6xl overflow-x-auto px-2">
+            <ul className="flex gap-1 lg:flex-wrap">
               {links.map((n) => (
                 <li key={n.href}>
                   <Link
                     href={n.href}
                     aria-current={active(n.href) ? 'page' : undefined}
-                    className={`block border-b-2 px-3 py-2 text-sm whitespace-nowrap ${
+                    className={`flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm whitespace-nowrap ${
                       active(n.href) ? 'border-primary-strong font-semibold text-ink' : 'border-transparent text-muted hover:text-ink'
                     }`}
                   >
+                    <NavIcon name={n.icon} className={`size-[18px] ${active(n.href) ? 'text-primary-strong' : ''}`} />
                     {t(n.label)}
                   </Link>
                 </li>

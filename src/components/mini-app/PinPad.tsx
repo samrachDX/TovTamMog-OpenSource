@@ -51,13 +51,15 @@ export function PinPad({
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // Title, dots and keypad stay together as one block; spacing and key height follow the
+  // viewport height so the whole pad fits on a short phone without scrolling.
   return (
-    <div className="flex flex-1 flex-col gap-6">
+    <div className="flex flex-col gap-[clamp(0.75rem,2.5dvh,1.25rem)]">
       <Header title={title} body={body} />
       <div
         role="status"
         aria-label={`${pin.length} / ${LENGTH}`}
-        className="flex justify-center gap-3 py-2"
+        className="flex justify-center gap-3 py-[clamp(0.25rem,1dvh,0.5rem)]"
       >
         {Array.from({ length: LENGTH }, (_, i) => (
           <span
@@ -69,7 +71,7 @@ export function PinPad({
         ))}
       </div>
       {error ? <Notice tone="danger">{error}</Notice> : null}
-      <div className="mt-auto grid grid-cols-3 gap-3">
+      <div className="mx-auto grid w-full max-w-xs grid-cols-3 gap-[clamp(0.5rem,1.5dvh,0.75rem)]">
         {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((d) => (
           <Key key={d} onClick={() => press(d)} disabled={busy}>
             {num(d)}
@@ -103,7 +105,7 @@ function Key({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`pressable min-h-16 rounded-2xl bg-pale text-ink disabled:opacity-40 ${
+      className={`pressable h-[clamp(3rem,8dvh,4rem)] rounded-2xl bg-pale text-ink disabled:opacity-40 ${
         small ? 'text-base' : 'text-2xl font-semibold'
       }`}
     >
