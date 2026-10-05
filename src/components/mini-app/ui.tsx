@@ -55,22 +55,24 @@ export function Notice({ tone, children }: { tone: 'danger' | 'success' | 'warni
   );
 }
 
-export function LanguageSwitch() {
+/** `compact` shows short labels (ខ្មែរ / EN) so a long name beside it keeps its room. */
+export function LanguageSwitch({ compact = false }: { compact?: boolean }) {
   const { locale, setLocale, t } = useI18n();
   const option = (value: 'km-KH' | 'en', label: string) => (
     <button
       type="button"
       aria-pressed={locale === value}
+      aria-label={compact ? label : undefined}
       onClick={() => setLocale(value)}
-      className={`pressable min-h-9 rounded-lg px-3 text-sm ${
+      className={`pressable rounded-lg ${compact ? 'min-h-8 min-w-10 px-2 text-xs' : 'min-h-9 px-3 text-sm'} ${
         locale === value ? 'bg-surface font-semibold text-ink shadow-sm' : 'text-muted'
       }`}
     >
-      {label}
+      {compact ? (value === 'en' ? 'EN' : 'ខ្មែរ') : label}
     </button>
   );
   return (
-    <div role="group" aria-label={t('common.language')} className="inline-flex gap-1 rounded-xl bg-pale p-1">
+    <div role="group" aria-label={t('common.language')} className={`inline-flex shrink-0 rounded-xl bg-pale ${compact ? 'gap-0.5 p-0.5' : 'gap-1 p-1'}`}>
       {option('km-KH', t('common.khmer'))}
       {option('en', t('common.english'))}
     </div>

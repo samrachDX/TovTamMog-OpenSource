@@ -64,21 +64,22 @@ export function Home({ me, onClock }: { me: Me; onClock(action: 'clock_in' | 'cl
 
   return (
     <>
-      <header className="flex items-start justify-between gap-3">
+      <header className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 items-center gap-3">
           <Avatar src="/api/me/photo" version={profile.photoVersion} name={displayName} />
           <div className="min-w-0">
             <p className="text-sm text-muted">{t(greeting)}</p>
-            <p className="text-lg font-semibold leading-[1.6]">{displayName}</p>
+            <p className="text-lg font-semibold leading-[1.6] break-words">{displayName}</p>
           </div>
         </div>
-        <LanguageSwitch />
+        <LanguageSwitch compact />
       </header>
 
-      <div className="relative rounded-2xl border border-line p-4 text-sm">
+      <div className="relative rounded-2xl border border-line bg-[#fcfcfc] p-4 text-sm">
         {/* Decorative animation in the corner; the wide rows leave room for it. Its frames have a
-            near-white (#FDFDFD) background, which multiply blends into the white card. */}
-        <LottieAnimation src={EMPLOYEE_CARD_ANIMATION} className="pointer-events-none absolute right-2 bottom-2 size-20 mix-blend-multiply" />
+            near-white (#FDFDFD) background; a slight brightness lift makes it pure white, which
+            multiply then blends into the #fcfcfc card without a visible box. */}
+        <LottieAnimation src={EMPLOYEE_CARD_ANIMATION} className="pointer-events-none absolute right-2 bottom-2 size-20 mix-blend-multiply brightness-[1.02]" />
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2 [&>div.col-span-2]:pr-20">
           <Field label={t('home.employeeCode')} value={`${profile.employeeCode} · ${pick(profile.category.km, profile.category.en)}`} />
           <Field label={t('home.branch')} value={branch ? pick(branch.nameKm, branch.nameEn) : t('common.none')} />
