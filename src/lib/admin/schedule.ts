@@ -2,7 +2,7 @@ import type { Db } from '@/lib/db/types';
 import { AppError } from '@/lib/errors';
 import { recordAudit } from '@/lib/audit';
 import { dmy, notify } from '@/lib/notifications';
-import { generateWeeklyShifts } from './weekly';
+import { generateWeeklyShifts, refreshTemplateSchedules } from './weekly';
 import {
   bool, date, int, optUuid, reason, requireCan, text, time, uuid, uuidList, DATE, type Actor,
 } from './actor';
@@ -34,7 +34,11 @@ export async function listTemplates(db: Db, actor: Actor, branchId: string): Pro
   return db.query<ShiftTemplate>(`${TEMPLATE_SELECT} where branch_id = $1 order by active desc, start_time`, [branchId]);
 }
 
-export async function saveTemplate(db: Db, actor: Actor, input: Input): Promise<{ id: string }> {
+/**
+ * Creates a template, or updates it when `id` is given. Changing an existing template's times
+ * moves the upcoming shifts of the weekly schedules that use it; one-off shifts keep theirs.
+ */
+export async function saveTemplate(db: Db, actor: Actor, input: Input): Promise<{ id: string; schedules?: number; shifts?: number }> {
   const branchId = uuid(input, 'branchId');
   requireCan(actor, 'schedule.manage', branchId);
   await branchTimezone(db, actor, branchId);
@@ -50,14 +54,22 @@ export async function saveTemplate(db: Db, actor: Actor, input: Input): Promise<
   if (data.startTime === data.endTime) throw new AppError('INVALID_TIME_RANGE');
   return db.tx(async (tx) => {
     let saved: string;
+    let refreshed: { schedules: number; shifts: number } | undefined;
     if (id) {
+      const before = await tx.query<{ s: string; e: string }>(
+        `select to_char(start_time, 'HH24:MI') as s, to_char(end_time, 'HH24:MI') as e from shift_templates where id = $1 and branch_id = $2 for update`,
+        [id, branchId],
+      );
       const rows = await tx.query<{ id: string }>(
         `update shift_templates set name_km = $3, name_en = $4, start_time = $5::time, end_time = $6::time,
            break_minutes = $7, active = $8, updated_at = $9 where id = $1 and branch_id = $2 returning id`,
         [id, branchId, data.nameKm, data.nameEn, data.startTime, data.endTime, data.breakMinutes, data.active, actor.now ?? new Date()],
       );
-      if (!rows[0]) throw new AppError('NOT_FOUND');
+      if (!rows[0] || !before[0]) throw new AppError('NOT_FOUND');
       saved = id;
+      if (before[0].s !== data.startTime || before[0].e !== data.endTime) {
+        refreshed = await refreshTemplateSchedules(tx, actor.orgId, id, actor.now ?? new Date());
+      }
     } else {
       const rows = await tx.query<{ id: string }>(
         `insert into shift_templates (branch_id, name_km, name_en, start_time, end_time, break_minutes, active)
@@ -68,9 +80,9 @@ export async function saveTemplate(db: Db, actor: Actor, input: Input): Promise<
     }
     await recordAudit(tx, {
       orgId: actor.orgId, actorEmployeeId: actor.employeeId, action: id ? 'shift_template.update' : 'shift_template.create',
-      entityType: 'shift_template', entityId: saved, branchId, after: data, ip: actor.ip, at: actor.now,
+      entityType: 'shift_template', entityId: saved, branchId, after: { ...data, ...refreshed }, ip: actor.ip, at: actor.now,
     });
-    return { id: saved };
+    return { id: saved, ...refreshed };
   });
 }
 

@@ -235,6 +235,31 @@ export async function setWeeklySchedule(db: Db, actor: Actor, input: Input): Pro
 }
 
 /**
+ * After a shift template's times change, rebuilds the upcoming shifts of every weekly schedule
+ * that uses it, so they follow the new times. Shifts someone has clocked against and days
+ * given off are left alone. Each person is told their new times.
+ */
+export async function refreshTemplateSchedules(tx: Db, orgId: string, templateId: string, now: Date): Promise<{ schedules: number; shifts: number }> {
+  const rows = await tx.query<{ id: string; employee_id: string; branch_id: string; weekdays: number[]; starts_on: string }>(
+    `select w.id, w.employee_id, w.branch_id, w.weekdays::int[] as weekdays, w.starts_on::text as starts_on
+     from weekly_schedules w where w.template_id = $1 and w.active for update`,
+    [templateId],
+  );
+  if (!rows.length) return { schedules: 0, shifts: 0 };
+  const tpl = await tx.query<Template>(
+    `select name_km, name_en, to_char(start_time, 'HH24:MI') as s, to_char(end_time, 'HH24:MI') as e from shift_templates where id = $1`,
+    [templateId],
+  );
+  let shifts = 0;
+  for (const w of rows) {
+    await clearFuture(tx, w.id, now);
+    shifts += await generateWeeklyShifts(tx, { now, scheduleId: w.id });
+    await tellPeople(tx, orgId, [w.employee_id], w.branch_id, tpl[0], w.weekdays, w.starts_on, now);
+  }
+  return { schedules: rows.length, shifts };
+}
+
+/**
  * Changes one person's weekly schedule in place: its shift, working days and dates. The
  * upcoming shifts it made are recreated to match, except where someone has clocked in, and
  * days given off (cancelled shifts) stay off. Newly added days are taken from the person's

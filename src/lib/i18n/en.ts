@@ -651,4 +651,10 @@ export const en: Record<MessageKey, string> = {
   'qrPoster.title': 'Scan to clock in and out',
   'qrPoster.code': 'Branch code {code}',
   'qrPoster.footer': 'Attendance',
+
+  // ---- Editing shift templates ----
+  'portal.sched.editTemplate': 'Edit shift template',
+  'portal.sched.templateTimesNote': 'Weekly schedules that use this template will move to the new times from today. One-off shifts and shifts already worked keep their times. The people affected are told.',
+  'portal.sched.templateActiveHint': 'Disabled templates cannot be chosen for new shifts. Weekly schedules already using it carry on.',
+  'portal.sched.templateMoved': 'Template saved. Upcoming shifts moved to the new times for {people} weekly schedules.',
 };

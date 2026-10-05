@@ -214,4 +214,28 @@ describe('weekly schedule', () => {
     expect((await shifts(w5, '2026-10-12', '2026-10-12')).map((x) => x.status)).toEqual(['cancelled']);
     expect((await listNotifications(db, w5) as { kind: string }[]).filter((n) => n.kind === 'weekly_schedule')).toHaveLength(3);
   });
+
+  it('editing a template\'s times moves upcoming weekly shifts; one-off shifts keep theirs', async () => {
+    const { id: late } = await saveTemplate(db, manager, { branchId: f.branchId, nameKm: 'វេនយប់', nameEn: 'Late', startTime: '18:00', endTime: '22:00' });
+    const w6 = await addEmployee(db, f.orgId, 'W6', [f.branchId]);
+    await setWeeklySchedule(db, manager, { branchId: f.branchId, employeeIds: [w6], templateId: late, weekdays: [2, 4] });
+    const oneOff = await addEmployee(db, f.orgId, 'W7', [f.branchId]);
+    await db.query(
+      `insert into shift_assignments (employee_id, branch_id, template_id, work_date, start_at, end_at, status) values ($1, $2, $3, '2026-10-07', $4, $5, 'published')`,
+      [oneOff, f.branchId, late, new Date('2026-10-07T11:00:00Z'), new Date('2026-10-07T15:00:00Z')],
+    );
+    const before = (await shifts(w6)).length;
+
+    // Renaming only changes nothing on the schedule.
+    expect(await saveTemplate(db, manager, { id: late, branchId: f.branchId, nameKm: 'វេនយប់', nameEn: 'Night', startTime: '18:00', endTime: '22:00' }))
+      .not.toHaveProperty('shifts');
+
+    const r = await saveTemplate(db, manager, { id: late, branchId: f.branchId, nameKm: 'វេនយប់', nameEn: 'Night', startTime: '17:00', endTime: '21:30' });
+    expect(r).toMatchObject({ schedules: 1 });
+    const tue = await shifts(w6, '2026-10-13', '2026-10-13');
+    expect(tue.map((x) => [x.s, x.e])).toEqual([[new Date('2026-10-13T10:00:00Z'), new Date('2026-10-13T14:30:00Z')]]);
+    expect((await shifts(w6)).length).toBe(before);
+    expect((await shifts(oneOff, '2026-10-07', '2026-10-07'))[0].s).toEqual(new Date('2026-10-07T11:00:00Z'));
+    expect((await listWeeklySchedules(db, manager, f.branchId)).find((x) => x.employeeCode === 'W6')).toMatchObject({ startTime: '17:00', endTime: '21:30' });
+  });
 });

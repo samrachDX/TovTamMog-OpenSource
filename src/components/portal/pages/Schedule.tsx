@@ -96,7 +96,8 @@ export function Schedule() {
   type Person = { id: string; employeeCode: string; nameKm: string; nameEn: string | null };
   const [person, setPerson] = useState<Person | null>(null);
   const [assigning, setAssigning] = useState(false);
-  const [templating, setTemplating] = useState(false);
+  /** `true` adds a template; a template edits it. */
+  const [templating, setTemplating] = useState<Template | boolean>(false);
   const [cancel, setCancel] = useState<Assignment | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -344,10 +345,14 @@ export function Schedule() {
           {(d) => d.items.length ? (
             <ul className="flex flex-col gap-2 text-sm">
               {d.items.map((tp) => (
-                <li key={tp.id} className="flex flex-wrap items-center gap-2">
-                  <span className="font-semibold">{name(tp)}</span>
+                <li key={tp.id} className="flex min-h-10 flex-wrap items-center gap-2 border-b border-line pb-2 last:border-0 last:pb-0">
+                  <span className={`font-semibold ${tp.active ? '' : 'text-muted'}`}>{name(tp)}</span>
                   <span className="tabular-nums text-muted">{tp.startTime}–{tp.endTime}</span>
                   {tp.overnight ? <Badge tone="muted">{t('portal.sched.overnight')}</Badge> : null}
+                  {!tp.active ? <Badge tone="muted">{t('portal.lt.inactive')}</Badge> : null}
+                  {canManage ? (
+                    <span className="ml-auto"><SmallButton onClick={() => setTemplating(tp)}>{t('portal.edit')}</SmallButton></span>
+                  ) : null}
                 </li>
               ))}
             </ul>
@@ -355,7 +360,21 @@ export function Schedule() {
         </LoadState>
       </Card>
 
-      <TemplateDialog key={`t${templating}`} open={templating} branchId={branchId} onClose={() => setTemplating(false)} onSaved={templates.reload} />
+      <TemplateDialog
+        key={typeof templating === 'object' ? templating.id : `t${templating}`}
+        open={templating !== false}
+        template={typeof templating === 'object' ? templating : undefined}
+        branchId={branchId}
+        onClose={() => setTemplating(false)}
+        onSaved={(msg) => {
+          templates.reload();
+          if (msg) {
+            setNotice(msg);
+            weekly.reload();
+            shifts.reload();
+          }
+        }}
+      />
       <AssignDialog
         key={`a${assigning}${weekStart}`}
         open={assigning}
@@ -427,14 +446,23 @@ export function Schedule() {
   );
 }
 
-function TemplateDialog({ open, branchId, onClose, onSaved }: { open: boolean; branchId: string; onClose(): void; onSaved(): void }) {
-  const { t, locale, errorText } = useI18n();
-  const [f, setF] = useState({ nameKm: '', nameEn: '', startTime: '08:00', endTime: '16:00' });
+function TemplateDialog({
+  open, template, branchId, onClose, onSaved,
+}: {
+  open: boolean; template?: Template; branchId: string; onClose(): void; onSaved(message?: string): void;
+}) {
+  const { t, locale, num, errorText } = useI18n();
+  const [f, setF] = useState(() => ({
+    nameKm: template?.nameKm ?? '', nameEn: template?.nameEn ?? '',
+    startTime: template?.startTime ?? '08:00', endTime: template?.endTime ?? '16:00',
+  }));
+  const [active, setActive] = useState(template?.active ?? true);
+  const timesChanged = !!template && (f.startTime !== template.startTime || f.endTime !== template.endTime);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const set = (k: keyof typeof f, v: string) => setF((x) => ({ ...x, [k]: v }));
   return (
-    <Dialog open={open} title={t('portal.sched.addTemplate')} onClose={onClose}>
+    <Dialog open={open} title={t(template ? 'portal.sched.editTemplate' : 'portal.sched.addTemplate')} onClose={onClose}>
       <form
         className="flex flex-col gap-3"
         onSubmit={async (e) => {
@@ -442,8 +470,10 @@ function TemplateDialog({ open, branchId, onClose, onSaved }: { open: boolean; b
           setBusy(true);
           setError(null);
           try {
-            await api('/api/portal/schedule/templates', { body: { ...f, branchId }, locale });
-            onSaved();
+            const res = await api<{ schedules?: number; shifts?: number }>('/api/portal/schedule/templates', {
+              body: { ...f, branchId, active, id: template?.id }, locale,
+            });
+            onSaved(res.schedules ? t('portal.sched.templateMoved', { people: num(res.schedules) }) : undefined);
             onClose();
           } catch (err) {
             setError(errorText(err));
@@ -460,6 +490,13 @@ function TemplateDialog({ open, branchId, onClose, onSaved }: { open: boolean; b
             <TextInput required type="time" value={f.endTime} onChange={(e) => set('endTime', e.target.value)} />
           </Field>
         </div>
+        {template ? (
+          <div>
+            <Check label={t('portal.lt.active')} checked={active} onChange={setActive} />
+            <p className="ml-8 text-xs text-muted">{t('portal.sched.templateActiveHint')}</p>
+          </div>
+        ) : null}
+        {timesChanged ? <Notice tone="info">{t('portal.sched.templateTimesNote')}</Notice> : null}
         {error ? <Notice tone="danger">{error}</Notice> : null}
         <div className="flex justify-end gap-2">
           <SmallButton onClick={onClose}>{t('common.cancel')}</SmallButton>
