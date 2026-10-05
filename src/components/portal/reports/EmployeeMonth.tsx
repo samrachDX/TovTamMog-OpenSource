@@ -8,7 +8,7 @@ import { RecordDialog, type RecordSummary } from '../pages/RecordDialog';
 import { Badge, Notice } from '../ui';
 import { rateTone, type MonthlyRow } from './Monthly';
 import {
-  currentMonth, docTable, initialFilters, ReportFrame, ReportTable, SummaryStrip, useFilters, useReport, type Base, type RCol,
+  currentMonth, docTable, ReportFrame, ReportTable, SummaryStrip, useFilters, useReport, type Base, type RCol,
 } from './shared';
 
 type DayStatus = 'present' | 'late' | 'absent' | 'leave' | 'holiday' | 'dayOff' | 'scheduled' | 'working' | 'missedClockOut';
@@ -33,7 +33,7 @@ const TONE: Record<DayStatus, 'ok' | 'warn' | 'bad' | 'info' | 'neutral' | 'mute
 export function EmployeeMonth() {
   const { t, num, time, day, timeZone } = useI18n();
   const { name } = usePortal();
-  const f = useFilters(initialFilters({ month: currentMonth(timeZone), employeeId: '' }));
+  const f = useFilters({ month: currentMonth(timeZone), employeeId: '' });
   const state = useReport<Data>('employee', f.applied, !!f.applied.employeeId);
   const [open, setOpen] = useState<RecordSummary | null>(null);
   const weekday = (d: Day) => t(`reports.weekday.${d.weekday}` as 'reports.weekday.0');

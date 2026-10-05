@@ -6,7 +6,7 @@ import { hm } from '@/lib/client/report-export';
 import { usePortal } from '../PortalShell';
 import { Badge, Field, Select } from '../ui';
 import {
-  currentMonth, docTable, initialFilters, ReportFrame, ReportTable, SummaryStrip, useFilters, useReport, type Base, type RCol,
+  currentMonth, docTable, ReportFrame, ReportTable, SummaryStrip, useFilters, useReport, type Base, type RCol,
 } from './shared';
 
 type Status = 'pending' | 'approved' | 'rejected' | 'cancelled';
@@ -25,7 +25,7 @@ const TONE = { pending: 'warn', approved: 'ok', rejected: 'bad', cancelled: 'mut
 export function Overtime() {
   const { t, num, day, timeZone } = useI18n();
   const { name, can } = usePortal();
-  const f = useFilters(initialFilters({ month: currentMonth(timeZone), branchId: '', category: '', employeeId: '', otStatus: '' }));
+  const f = useFilters({ month: currentMonth(timeZone), branchId: '', category: '', employeeId: '', otStatus: '' });
   const state = useReport<Data>('overtime', f.applied);
 
   const columns: RCol<Row>[] = [

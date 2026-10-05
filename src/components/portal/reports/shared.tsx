@@ -23,14 +23,19 @@ export type Base = { period: Period; organization: Org };
 export type Filters = Record<string, string>;
 export type CommonField = 'month' | 'branch' | 'category' | 'employee' | 'employeeStatus';
 
-/** Draft filters the form edits, and the applied set the report was generated with. */
-export function useFilters(initial: Filters) {
-  const [draft, setDraft] = useState<Filters>(initial);
-  const [applied, setApplied] = useState<Filters>(initial);
+/**
+ * Draft filters the form edits, and the applied set the report was generated with.
+ * Starts from the address bar when it carries filters; Reset goes back to the defaults.
+ */
+export function useFilters(defaults: Filters) {
+  const [draft, setDraft] = useState<Filters>(() => initialFilters(defaults));
+  const [applied, setApplied] = useState<Filters>(draft);
   return {
     draft, applied,
+    dirty: Object.keys(draft).some((k) => draft[k] !== applied[k]),
     set: (k: string, v: string) => setDraft((d) => ({ ...d, [k]: v })),
     apply: () => setApplied(draft),
+    reset: () => { setDraft(defaults); setApplied(defaults); },
   };
 }
 
@@ -233,6 +238,27 @@ export function SummaryStrip({ items }: { items: { label: string; value: string;
   );
 }
 
+/**
+ * The one filter layout every report uses: fields on an even grid, period first and the
+ * employee search last, with Reset and the run button together at the bottom.
+ */
+export function FilterPanel({
+  children, onSubmit, onReset, dirty, submitLabel,
+}: { children: ReactNode; onSubmit(): void; onReset(): void; dirty: boolean; submitLabel: string }) {
+  const { t } = useI18n();
+  return (
+    <form className="rounded-xl border border-line bg-surface" onSubmit={(e) => { e.preventDefault(); onSubmit(); }}>
+      <h2 className="border-b border-line px-4 py-2.5 text-xs font-semibold tracking-[0.12em] text-muted uppercase">{t('reports.filters')}</h2>
+      <div className="grid items-start gap-x-4 gap-y-3 p-4 sm:grid-cols-2 lg:grid-cols-4">{children}</div>
+      <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2 border-t border-line px-4 py-3">
+        {dirty ? <p className="mr-auto text-xs text-muted">{t('reports.filtersChanged')}</p> : null}
+        <SmallButton onClick={onReset}>{t('reports.reset')}</SmallButton>
+        <SmallButton type="submit" tone="primary">{submitLabel}</SmallButton>
+      </div>
+    </form>
+  );
+}
+
 // ---- frame -------------------------------------------------------------------------
 
 export type DocParts = Pick<ReportDoc, 'summary' | 'tables' | 'notes'> & { landscape?: boolean; filters?: [string, string][] };
@@ -263,16 +289,11 @@ export function ReportFrame<T extends Base>({
         </div>
         {doc && state.data && !idle ? <ExportMenu reportKey={reportKey} title={title} applied={f.applied} data={state.data} doc={doc} /> : null}
       </div>
-      <form
-        className="grid items-end gap-3 rounded-xl border border-line bg-surface p-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6"
-        onSubmit={(e) => { e.preventDefault(); f.apply(); }}
-      >
-        <CommonFilters f={f} fields={fields} initialPeople={initialPeople} />
+      <FilterPanel onSubmit={f.apply} onReset={f.reset} dirty={f.dirty} submitLabel={t('reports.generate')}>
+        <CommonFilters f={f} fields={fields.filter((x) => x !== 'employee')} />
         {extra}
-        <div className="flex items-end">
-          <SmallButton type="submit" tone="primary">{t('reports.generate')}</SmallButton>
-        </div>
-      </form>
+        {fields.includes('employee') ? <CommonFilters f={f} fields={['employee']} initialPeople={initialPeople} /> : null}
+      </FilterPanel>
       {idle ? null : <LoadState state={state}>{(d) => (d ? children(d) : null)}</LoadState>}
     </div>
   );

@@ -3,7 +3,7 @@
 import { useI18n } from '@/components/mini-app/i18n-context';
 import { usePortal } from '../PortalShell';
 import {
-  currentMonth, docTable, initialFilters, ReportFrame, ReportTable, useFilters, useReport, type Base, type RCol,
+  currentMonth, docTable, ReportFrame, ReportTable, useFilters, useReport, type Base, type RCol,
 } from './shared';
 
 export type BranchRow = {
@@ -46,7 +46,7 @@ export function useBranchColumns(): RCol<BranchRow>[] {
 
 export function Branches() {
   const { t, timeZone } = useI18n();
-  const f = useFilters(initialFilters({ month: currentMonth(timeZone), branchId: '' }));
+  const f = useFilters({ month: currentMonth(timeZone), branchId: '' });
   const state = useReport<Data>('branches', f.applied);
   const columns = useBranchColumns();
 

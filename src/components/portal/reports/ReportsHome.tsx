@@ -10,13 +10,13 @@ import { query, type ReportKey } from './shared';
 
 type Entry = { key?: ReportKey; href?: string; title: MessageKey; desc: MessageKey; permission: string; exportable: boolean };
 
-/** What HR can open, grouped the way they think about it. Daily attendance is the existing Attendance page. */
+/** What HR can open, grouped the way they think about it. Daily attendance is the record-level page with corrections and rejected attempts. */
 const CATALOG: { group: MessageKey; items: Entry[] }[] = [
   {
     group: 'reports.g.attendance',
     items: [
+      { href: '/hr/reports/daily', title: 'reports.r.daily', desc: 'reports.r.daily.desc', permission: 'attendance.view', exportable: false },
       { key: 'monthly', title: 'reports.r.monthly', desc: 'reports.r.monthly.desc', permission: 'attendance.view', exportable: true },
-      { href: '/hr/attendance', title: 'reports.r.daily', desc: 'reports.r.daily.desc', permission: 'attendance.view', exportable: false },
       { key: 'employee', title: 'reports.r.employee', desc: 'reports.r.employee.desc', permission: 'attendance.view', exportable: false },
       { key: 'late-absence', title: 'reports.r.lateAbsence', desc: 'reports.r.lateAbsence.desc', permission: 'attendance.view', exportable: true },
       { key: 'overtime', title: 'reports.r.overtime', desc: 'reports.r.overtime.desc', permission: 'attendance.view', exportable: true },

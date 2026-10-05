@@ -4,7 +4,7 @@ import { useI18n } from '@/components/mini-app/i18n-context';
 import { usePortal } from '../PortalShell';
 import { Badge, Card, Field, Select } from '../ui';
 import {
-  currentMonth, docTable, initialFilters, ReportFrame, ReportTable, SummaryStrip, useFilters, useReport, type Base, type RCol,
+  currentMonth, docTable, ReportFrame, ReportTable, SummaryStrip, useFilters, useReport, type Base, type RCol,
 } from './shared';
 
 type Type = { id: string; nameKm: string | null; nameEn: string | null };
@@ -24,7 +24,7 @@ const TONE = { pending: 'warn', approved: 'ok', rejected: 'bad', cancelled: 'mut
 export function Leave() {
   const { t, num, day, timeZone } = useI18n();
   const { name } = usePortal();
-  const f = useFilters(initialFilters({ month: currentMonth(timeZone), branchId: '', category: '', employeeId: '', leaveStatus: '' }));
+  const f = useFilters({ month: currentMonth(timeZone), branchId: '', category: '', employeeId: '', leaveStatus: '' });
   const state = useReport<Data>('leave', f.applied);
   const typeName = (x: Type) => (x.nameKm ? name({ nameKm: x.nameKm, nameEn: x.nameEn }) : t('reports.otherLeave'));
 

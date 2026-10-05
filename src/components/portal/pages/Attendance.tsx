@@ -1,13 +1,15 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import { ApiError, api, getToken } from '@/lib/client/api';
 import { localDate, type MessageKey } from '@/lib/i18n';
 import { useI18n } from '@/components/mini-app/i18n-context';
 import { usePortal } from '../PortalShell';
 import { RecordDialog } from './RecordDialog';
+import { FilterPanel } from '../reports/shared';
 import {
-  Badge, Card, DataTable, Field, LoadState, Notice, PageHeader, Pager, Select, SmallButton, TextInput, useLoad, type Column,
+  Badge, Card, DataTable, Field, LoadState, Notice, Pager, Select, SmallButton, TextInput, useLoad, type Column,
 } from '../ui';
 
 type RecordStatus = 'clocked_in' | 'completed' | 'missed_clock_out' | 'absent' | 'pending_correction' | 'under_review';
@@ -35,8 +37,10 @@ export function Attendance() {
   const { me, name, can } = usePortal();
   const today = localDate(new Date(), timeZone);
   const [tab, setTab] = useState<'records' | 'attempts'>('records');
-  const [f, setF] = useState({ from: today, to: today, branchId: '', status: '', only: '', q: '' });
+  const defaults = { from: today, to: today, branchId: '', status: '', only: '', q: '' };
+  const [f, setF] = useState(defaults);
   const [applied, setApplied] = useState(f);
+  const dirty = (Object.keys(f) as (keyof typeof f)[]).some((k) => f[k] !== applied[k]);
   const [offset, setOffset] = useState(0);
   const set = (k: keyof typeof f, v: string) => setF((x) => ({ ...x, [k]: v }));
   const canAttempts = can('attendance.attempts.view');
@@ -155,16 +159,22 @@ export function Attendance() {
 
   return (
     <>
-      <PageHeader
-        title={t('nav.attendance')}
-        actions={can('report.export') ? (
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <Link href="/hr/reports" className="text-sm text-muted hover:text-ink">‹ {t('nav.reports')}</Link>
+          <h1 className="text-xl font-semibold leading-[1.6]">{t('reports.r.daily')}</h1>
+          <p className="text-sm text-muted">{t('reports.r.daily.desc')}</p>
+        </div>
+        {can('report.export') ? (
           <SmallButton disabled={exporting} onClick={() => void exportCsv()}>{exporting ? t('common.loading') : t('portal.att.export')}</SmallButton>
         ) : null}
-      />
+      </div>
       {exportError ? <Notice tone="danger">{exportError}</Notice> : null}
-      <form
-        className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6"
-        onSubmit={(e) => { e.preventDefault(); setOffset(0); setApplied(f); }}
+      <FilterPanel
+        onSubmit={() => { setOffset(0); setApplied(f); }}
+        onReset={() => { setOffset(0); setF(defaults); setApplied(defaults); }}
+        dirty={dirty}
+        submitLabel={t('reports.generate')}
       >
         <Field label={t('portal.from')}><TextInput type="date" required value={f.from} max={f.to} onChange={(e) => set('from', e.target.value)} /></Field>
         <Field label={t('portal.to')}><TextInput type="date" required value={f.to} min={f.from} onChange={(e) => set('to', e.target.value)} /></Field>
@@ -187,11 +197,12 @@ export function Attendance() {
                 <option value="early">{t('portal.att.earlyOnly')}</option>
               </Select>
             </Field>
-            <Field label={t('portal.search')}><TextInput value={f.q} onChange={(e) => set('q', e.target.value)} placeholder={t('portal.emp.searchHint')} /></Field>
+            <div className="sm:col-span-2">
+              <Field label={t('portal.search')}><TextInput value={f.q} onChange={(e) => set('q', e.target.value)} placeholder={t('portal.emp.searchHint')} /></Field>
+            </div>
           </>
         ) : null}
-        <div className="flex items-end"><SmallButton type="submit" tone="primary">{t('portal.apply')}</SmallButton></div>
-      </form>
+      </FilterPanel>
 
       <Card>
         {canAttempts ? (

@@ -4,7 +4,7 @@ import { useI18n } from '@/components/mini-app/i18n-context';
 import { usePortal } from '../PortalShell';
 import { Badge } from '../ui';
 import {
-  currentMonth, docTable, initialFilters, ReportFrame, ReportTable, SummaryStrip, useFilters, useReport, type Base, type RCol,
+  currentMonth, docTable, ReportFrame, ReportTable, SummaryStrip, useFilters, useReport, type Base, type RCol,
 } from './shared';
 
 type Row = {
@@ -21,7 +21,7 @@ const TONE = { active: 'ok', suspended: 'warn', inactive: 'muted' } as const;
 export function Directory() {
   const { t, num, timeZone, dateTime } = useI18n();
   const { name } = usePortal();
-  const f = useFilters(initialFilters({ month: currentMonth(timeZone), branchId: '', category: '', employeeStatus: '' }));
+  const f = useFilters({ month: currentMonth(timeZone), branchId: '', category: '', employeeStatus: '' });
   const state = useReport<Data>('directory', f.applied);
 
   const columns: RCol<Row>[] = [

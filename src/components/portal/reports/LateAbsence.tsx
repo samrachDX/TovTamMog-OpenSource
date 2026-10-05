@@ -5,7 +5,7 @@ import { useI18n } from '@/components/mini-app/i18n-context';
 import { usePortal } from '../PortalShell';
 import { Badge, Field, Select } from '../ui';
 import {
-  currentMonth, docTable, initialFilters, query, ReportFrame, ReportTable, SummaryStrip, useFilters, useReport, type Base, type RCol,
+  currentMonth, docTable, query, ReportFrame, ReportTable, SummaryStrip, useFilters, useReport, type Base, type RCol,
 } from './shared';
 
 type Row = {
@@ -22,7 +22,7 @@ export function LateAbsence() {
   const { t, num, time, day, timeZone } = useI18n();
   const { name } = usePortal();
   const router = useRouter();
-  const f = useFilters(initialFilters({ month: currentMonth(timeZone), branchId: '', category: '', employeeId: '', employeeStatus: '', kind: '', sort: 'latest' }));
+  const f = useFilters({ month: currentMonth(timeZone), branchId: '', category: '', employeeId: '', employeeStatus: '', kind: '', sort: 'latest' });
   const state = useReport<Data>('late-absence', f.applied);
 
   const columns: RCol<Row>[] = [

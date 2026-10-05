@@ -6,7 +6,7 @@ import { hm } from '@/lib/client/report-export';
 import { usePortal } from '../PortalShell';
 import { Badge, Field, Select } from '../ui';
 import {
-  currentMonth, docTable, initialFilters, query, ReportFrame, ReportTable, SummaryStrip, useFilters, useReport, type Base, type RCol,
+  currentMonth, docTable, query, ReportFrame, ReportTable, SummaryStrip, useFilters, useReport, type Base, type RCol,
 } from './shared';
 
 export type MonthlyRow = {
@@ -68,7 +68,7 @@ export function useHoursNotes(): string[] {
 export function Monthly() {
   const { t, num, timeZone } = useI18n();
   const router = useRouter();
-  const f = useFilters(initialFilters({ month: currentMonth(timeZone), branchId: '', category: '', employeeId: '', employeeStatus: '', attendance: '' }));
+  const f = useFilters({ month: currentMonth(timeZone), branchId: '', category: '', employeeId: '', employeeStatus: '', attendance: '' });
   const state = useReport<Data>('monthly', f.applied);
   const columns = useMonthlyColumns();
   const notes = useHoursNotes();

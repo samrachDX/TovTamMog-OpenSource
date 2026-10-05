@@ -1,5 +1,6 @@
-import { Attendance } from '@/components/portal/pages/Attendance';
+import { redirect } from 'next/navigation';
 
+/** Attendance now lives in Reports; old links and bookmarks land there. */
 export default function Page() {
-  return <Attendance />;
+  redirect('/hr/reports/daily');
 }

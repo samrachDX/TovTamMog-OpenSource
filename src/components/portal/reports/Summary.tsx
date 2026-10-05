@@ -7,7 +7,7 @@ import { Card } from '../ui';
 import { useBranchColumns, type BranchRow } from './Branches';
 import { useHoursNotes, type MonthlyRow } from './Monthly';
 import {
-  currentMonth, docTable, initialFilters, ReportFrame, ReportTable, SummaryStrip, useFilters, useMonthLabel, useReport, type Base, type RCol,
+  currentMonth, docTable, ReportFrame, ReportTable, SummaryStrip, useFilters, useMonthLabel, useReport, type Base, type RCol,
 } from './shared';
 
 type Data = Base & {
@@ -28,7 +28,7 @@ export function Summary() {
   const { t, num, timeZone } = useI18n();
   const { name } = usePortal();
   const monthLabel = useMonthLabel();
-  const f = useFilters(initialFilters({ month: currentMonth(timeZone), branchId: '' }));
+  const f = useFilters({ month: currentMonth(timeZone), branchId: '' });
   const state = useReport<Data>('summary', f.applied);
   const branchColumns = useBranchColumns();
   const notes = useHoursNotes();
