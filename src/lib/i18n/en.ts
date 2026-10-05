@@ -564,4 +564,11 @@ export const en: Record<MessageKey, string> = {
   'portal.weekly.remove': 'End weekly schedule',
   'portal.weekly.removeNote': 'Upcoming shifts created from this schedule are removed. Shifts already worked are kept.',
   'portal.weekly.needTemplate': 'Add a shift template first (for example Morning 08:00–16:00).',
+
+  // ---- roles layout ----
+  'portal.role.permCount': '{count} permissions',
+  'portal.role.selectAll': 'Select all',
+  'portal.role.section.custom': 'Custom roles',
+  'portal.role.section.builtIn': 'Built-in roles',
+  'portal.role.noCustom': 'No custom roles yet. Duplicate a built-in role to start.',
 };

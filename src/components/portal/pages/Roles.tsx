@@ -5,7 +5,7 @@ import { api } from '@/lib/client/api';
 import type { MessageKey } from '@/lib/i18n';
 import { useI18n } from '@/components/mini-app/i18n-context';
 import { usePortal } from '../PortalShell';
-import { Badge, Card, Check, Dialog, Field, LoadState, Notice, PageHeader, ReasonDialog, Select, SmallButton, TextInput, useLoad } from '../ui';
+import { Check, Dialog, Field, LoadState, Notice, PageHeader, ReasonDialog, Select, SmallButton, TextInput, useLoad } from '../ui';
 
 type Role = {
   key: string; nameKm: string; nameEn: string; description: string | null; rank: number; builtIn: boolean;
@@ -71,38 +71,61 @@ export function Roles() {
       />
       <p className="text-sm text-muted">{t('portal.role.intro')}</p>
       <LoadState state={state}>
-        {(d) => (
-          <div className="grid gap-4 lg:grid-cols-2">
-            {d.items.map((r) => (
-              <Card
-                key={r.key}
-                title={name(r)}
-                actions={
-                  <span className="flex flex-wrap items-center gap-2">
-                    <Badge tone="muted">{r.builtIn ? t('portal.role.builtIn') : t('portal.role.custom')}</Badge>
-                    {levels.length ? <SmallButton onClick={() => { setError(null); setForm(blank(r)); }}>{t('portal.role.duplicate')}</SmallButton> : null}
-                    {editable(r) ? (
-                      <>
-                        <SmallButton onClick={() => { setError(null); setForm({ key: r.key, nameKm: r.nameKm, nameEn: r.nameEn, description: r.description ?? '', rank: r.rank, permissions: r.permissions }); }}>{t('portal.edit')}</SmallButton>
-                        <SmallButton tone="danger" disabled={r.holders > 0} onClick={() => setRemove(r)}>{t('portal.role.delete')}</SmallButton>
-                      </>
-                    ) : null}
-                  </span>
-                }
-              >
-                <p className="mb-2 text-sm text-muted">
-                  {levelLabel(r.rank)} · {t('portal.role.holders', { count: num(r.holders) })}
-                  {r.description ? ` · ${r.description}` : ''}
-                </p>
-                {r.permissions.length ? (
-                  <ul className="flex flex-wrap gap-1.5">
-                    {r.permissions.map((p) => <li key={p}><Badge tone="muted">{t(perm(p))}</Badge></li>)}
-                  </ul>
-                ) : <p className="text-sm text-muted">{t('portal.role.noPermissions')}</p>}
-              </Card>
-            ))}
-          </div>
-        )}
+        {(d) => {
+          const byRank = [...d.items].sort((x, y) => y.rank - x.rank);
+          const sections = [
+            { title: t('portal.role.section.custom'), rows: byRank.filter((r) => !r.builtIn), empty: t('portal.role.noCustom') },
+            { title: t('portal.role.section.builtIn'), rows: byRank.filter((r) => r.builtIn), empty: '' },
+          ];
+          return (
+            <div className="flex flex-col gap-5">
+              {sections.map((s) => (
+                <section key={s.title}>
+                  <h2 className="mb-2 text-sm font-semibold text-muted">{s.title}</h2>
+                  {s.rows.length ? (
+                    <div className="divide-y divide-line rounded-xl border border-line bg-surface">
+                      {s.rows.map((r) => (
+                        <details key={r.key} className="group">
+                          <summary className="pressable flex min-h-12 cursor-pointer list-none flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 [&::-webkit-details-marker]:hidden">
+                            <span aria-hidden className="text-muted transition-transform group-open:rotate-90">›</span>
+                            <span className="min-w-40 flex-1 font-semibold">{name(r)}</span>
+                            <span className="w-44 text-sm text-muted">{levelLabel(r.rank)}</span>
+                            <span className="w-36 text-sm text-muted">{t('portal.role.holders', { count: num(r.holders) })}</span>
+                            <span className="w-28 text-sm text-muted sm:text-right">{t('portal.role.permCount', { count: num(r.permissions.length) })}</span>
+                          </summary>
+                          <div className="border-t border-line bg-pale/40 px-4 py-3">
+                            {r.description ? <p className="mb-3 text-sm text-muted">{r.description}</p> : null}
+                            {r.permissions.length ? (
+                              <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
+                                {GROUPS.filter((g) => g.items.some((p) => r.permissions.includes(p))).map((g) => (
+                                  <div key={g.title}>
+                                    <h3 className="mb-1 text-xs font-semibold text-muted">{t(g.title)}</h3>
+                                    <ul className="flex flex-col gap-0.5 text-sm">
+                                      {g.items.filter((p) => r.permissions.includes(p)).map((p) => <li key={p}>{t(perm(p))}</li>)}
+                                    </ul>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : <p className="text-sm text-muted">{t('portal.role.noPermissions')}</p>}
+                            {levels.length ? (
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {editable(r) ? (
+                                  <SmallButton onClick={() => { setError(null); setForm({ key: r.key, nameKm: r.nameKm, nameEn: r.nameEn, description: r.description ?? '', rank: r.rank, permissions: r.permissions }); }}>{t('portal.edit')}</SmallButton>
+                                ) : null}
+                                <SmallButton onClick={() => { setError(null); setForm(blank(r)); }}>{t('portal.role.duplicate')}</SmallButton>
+                                {editable(r) ? <SmallButton tone="danger" disabled={r.holders > 0} onClick={() => setRemove(r)}>{t('portal.role.delete')}</SmallButton> : null}
+                              </div>
+                            ) : null}
+                          </div>
+                        </details>
+                      ))}
+                    </div>
+                  ) : <p className="rounded-xl border border-dashed border-line px-4 py-3 text-sm text-muted">{s.empty}</p>}
+                </section>
+              ))}
+            </div>
+          );
+        }}
       </LoadState>
 
       <Dialog open={form !== null && !askReason} title={t(form?.key ? 'portal.role.edit' : 'portal.role.add')} onClose={() => setForm(null)}>
@@ -137,26 +160,45 @@ export function Roles() {
                 <TextInput maxLength={300} value={form.description} onChange={(e) => set('description', e.target.value)} />
               </Field>
             </div>
-            {GROUPS.map((g) => (
-              <fieldset key={g.title} className="rounded-lg border border-line px-3 pb-1">
-                <legend className="px-1 text-sm text-muted">{t(g.title)}</legend>
-                <div className="grid gap-x-3 sm:grid-cols-2">
-                  {g.items.map((p) => {
-                    const checked = form.permissions.includes(p);
-                    return (
-                      <Check
-                        key={p}
-                        label={t(perm(p))}
-                        checked={checked}
-                        // You can only give what you hold yourself; what is already on the role can still be removed.
-                        disabled={!canOrg(p) && !checked}
-                        onChange={(v) => set('permissions', v ? [...form.permissions, p] : form.permissions.filter((x) => x !== p))}
-                      />
-                    );
-                  })}
-                </div>
-              </fieldset>
-            ))}
+            {GROUPS.map((g) => {
+              const held = g.items.filter((p) => form.permissions.includes(p));
+              // "Select all" covers what this person may give; anything already on the role stays removable.
+              const grantable = g.items.filter((p) => canOrg(p));
+              const all = grantable.length > 0 && grantable.every((p) => form.permissions.includes(p));
+              return (
+                <fieldset key={g.title} className="rounded-lg border border-line">
+                  <legend className="sr-only">{t(g.title)}</legend>
+                  <div className="flex items-center justify-between gap-3 border-b border-line bg-pale/50 px-3">
+                    <span className="text-sm font-semibold">
+                      {t(g.title)} <span className="font-normal text-muted">{num(held.length)}/{num(g.items.length)}</span>
+                    </span>
+                    <Check
+                      label={t('portal.role.selectAll')}
+                      checked={all}
+                      disabled={!grantable.length}
+                      onChange={(v) => set('permissions', v
+                        ? [...new Set([...form.permissions, ...grantable])]
+                        : form.permissions.filter((x) => !g.items.includes(x)))}
+                    />
+                  </div>
+                  <div className="grid gap-x-3 px-3 sm:grid-cols-2">
+                    {g.items.map((p) => {
+                      const checked = form.permissions.includes(p);
+                      return (
+                        <Check
+                          key={p}
+                          label={t(perm(p))}
+                          checked={checked}
+                          // You can only give what you hold yourself; what is already on the role can still be removed.
+                          disabled={!canOrg(p) && !checked}
+                          onChange={(v) => set('permissions', v ? [...form.permissions, p] : form.permissions.filter((x) => x !== p))}
+                        />
+                      );
+                    })}
+                  </div>
+                </fieldset>
+              );
+            })}
             {error ? <Notice tone="danger">{error}</Notice> : null}
             <div className="flex justify-end gap-2">
               <SmallButton onClick={() => setForm(null)}>{t('common.cancel')}</SmallButton>

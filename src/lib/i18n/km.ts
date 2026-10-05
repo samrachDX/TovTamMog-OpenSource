@@ -563,6 +563,13 @@ export const km = {
   'portal.weekly.remove': 'បញ្ឈប់កាលវិភាគប្រចាំសប្តាហ៍',
   'portal.weekly.removeNote': 'វេនខាងមុខដែលបង្កើតពីកាលវិភាគនេះនឹងត្រូវដកចេញ។ វេនដែលបានកត់វត្តមានរួចនៅរក្សាទុក។',
   'portal.weekly.needTemplate': 'សូមបន្ថែមគំរូវេនជាមុនសិន (ឧទាហរណ៍ វេនព្រឹក 08:00–16:00)។',
+
+  // ---- roles layout ----
+  'portal.role.permCount': 'សិទ្ធិ {count}',
+  'portal.role.selectAll': 'ជ្រើសទាំងអស់',
+  'portal.role.section.custom': 'តួនាទីបង្កើតថ្មី',
+  'portal.role.section.builtIn': 'តួនាទីដើម',
+  'portal.role.noCustom': 'មិនទាន់មានតួនាទីបង្កើតថ្មីទេ។ ចម្លងតួនាទីដើមមួយ ដើម្បីចាប់ផ្ដើម។',
 } as const;
 
 export type MessageKey = keyof typeof km;
