@@ -116,7 +116,9 @@ describe('hours', () => {
     await expect(ask('17:00', '17:00')).rejects.toThrow('INVALID_TIME_RANGE');
     await expect(ask('08:00', '21:00', '2026-10-09')).rejects.toThrow('INVALID_TIME_RANGE');
     await expect(ask('17:00', '19:00', '2026-12-30')).rejects.toThrow('DATE_RANGE_INVALID');
-    // Past midnight is fine.
+    // Past midnight needs night shifts turned on.
+    await expect(ask('22:00', '02:00', '2026-10-09')).rejects.toThrow('NIGHT_SHIFTS_OFF');
+    await db.query(`update organizations set night_shifts_enabled = true where id = $1`, [f.orgId]);
     await expect(ask('22:00', '02:00', '2026-10-09')).resolves.toHaveProperty('id');
   });
 });

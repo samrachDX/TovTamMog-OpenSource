@@ -36,17 +36,79 @@ async function createSession(
   emp: EmployeeAuthRow,
   tg: TelegramUser,
   meta: RequestMeta,
+  deviceToken?: string | null,
 ): Promise<AuthResult> {
   const now = meta.now ?? new Date();
   const token = newSessionToken();
   const expiresAt = new Date(now.getTime() + cfg.sessionTtlHours * 3_600_000);
+  const pinSet = !!emp.pin_hash && !emp.pin_reset_required;
+  const remembered = pinSet && deviceToken ? await trustedDeviceValid(db, cfg, emp.id, tg.id, deviceToken, now) : false;
   await db.query(
-    `insert into sessions (employee_id, token_hash, telegram_user_id, expires_at, ip, user_agent, created_at, last_seen_at)
-     values ($1, $2, $3, $4, $5, $6, $7, $7)`,
-    [emp.id, keyedHash(cfg.appSecret, 'session', token), tg.id, expiresAt, meta.ip ?? null, meta.userAgent?.slice(0, 300) ?? null, now],
+    `insert into sessions (employee_id, token_hash, telegram_user_id, expires_at, ip, user_agent, created_at, last_seen_at, pin_verified_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $7, $8)`,
+    [emp.id, keyedHash(cfg.appSecret, 'session', token), tg.id, expiresAt, meta.ip ?? null, meta.userAgent?.slice(0, 300) ?? null, now,
+      remembered ? now : null],
   );
-  const state = !emp.pin_hash || emp.pin_reset_required ? 'pin_setup' : 'pin_required';
+  const state = !pinSet ? 'pin_setup' : remembered ? 'ready' : 'pin_required';
   return { state, token, expiresAt };
+}
+
+/**
+ * True when this phone had the PIN entered within the organization's remember period
+ * (counted from that PIN entry, using the current setting). The device must belong to
+ * the same employee and Telegram account, and not have been revoked by a PIN change,
+ * a PIN reset or signing out.
+ */
+async function trustedDeviceValid(
+  db: Db, cfg: Pick<AuthConfig, 'appSecret'>, employeeId: string, telegramUserId: number | string, deviceToken: string, now: Date,
+): Promise<boolean> {
+  if (deviceToken.length < 20 || deviceToken.length > 200) return false;
+  const rows = await db.query<{ id: string }>(
+    `update trusted_devices d set last_used_at = $4
+     from employees e join organizations o on o.id = e.org_id
+     where d.token_hash = $1 and d.employee_id = $2 and e.id = d.employee_id and d.telegram_user_id = $3
+       and d.revoked_at is null and d.expires_at > $4
+       and d.created_at + make_interval(days => o.pin_remember_days) > $4
+     returning d.id`,
+    [keyedHash(cfg.appSecret, 'device', deviceToken), employeeId, telegramUserId, now],
+  );
+  return rows.length > 0;
+}
+
+/**
+ * After a correct PIN: remembers this phone for the organization's remember period, so the
+ * Mini App opens without the PIN until then. Returns the token to keep on the phone, or null
+ * when the organization asks for the PIN every time.
+ */
+export async function rememberDevice(
+  db: Db,
+  cfg: Pick<AuthConfig, 'appSecret'>,
+  session: { id: string; employeeId: string; telegramUserId: string },
+  meta: RequestMeta = {},
+): Promise<string | null> {
+  const now = meta.now ?? new Date();
+  const [org] = await db.query<{ days: number }>(
+    `select o.pin_remember_days as days from employees e join organizations o on o.id = e.org_id where e.id = $1`,
+    [session.employeeId],
+  );
+  if (!org || org.days <= 0) return null;
+  const token = newSessionToken();
+  await db.query(
+    `insert into trusted_devices (employee_id, telegram_user_id, token_hash, created_at, expires_at, user_agent)
+     values ($1, $2, $3, $4, $5, $6)`,
+    [session.employeeId, session.telegramUserId, keyedHash(cfg.appSecret, 'device', token), now,
+      new Date(now.getTime() + org.days * 86_400_000), meta.userAgent?.slice(0, 300) ?? null],
+  );
+  return token;
+}
+
+/** Signing out forgets the phone, so the next open asks for the PIN. */
+export async function forgetDevice(db: Db, cfg: Pick<AuthConfig, 'appSecret'>, employeeId: string, deviceToken: unknown, now = new Date()): Promise<void> {
+  if (typeof deviceToken !== 'string' || deviceToken.length < 20 || deviceToken.length > 200) return;
+  await db.query(
+    `update trusted_devices set revoked_at = $3 where token_hash = $1 and employee_id = $2 and revoked_at is null`,
+    [keyedHash(cfg.appSecret, 'device', deviceToken), employeeId, now],
+  );
 }
 
 /** Step 1: exchange verified Telegram initData for an application session. */
@@ -55,10 +117,11 @@ export function authenticateTelegram(
   cfg: AuthConfig,
   initDataRaw: string,
   meta: RequestMeta = {},
+  deviceToken?: string | null,
 ): Promise<AuthResult> {
   return authenticate(db, cfg, meta, (now) =>
     verifyInitData(initDataRaw, cfg.botToken, { maxAgeSeconds: cfg.initDataMaxAgeSeconds, now }),
-  );
+  deviceToken);
 }
 
 /** Same as above for the portal in a desktop browser, using the Telegram Login Widget. */
@@ -88,6 +151,7 @@ async function authenticate(
   cfg: AuthConfig,
   meta: RequestMeta,
   verify: (now: Date) => VerifiedInitData,
+  deviceToken?: string | null,
 ): Promise<AuthResult> {
   const now = meta.now ?? new Date();
   if (meta.ip) {
@@ -125,7 +189,7 @@ async function authenticate(
     });
     throw new AppError('ACCOUNT_DISABLED');
   }
-  return createSession(db, cfg, emp, tg, meta);
+  return createSession(db, cfg, emp, tg, meta, deviceToken);
 }
 
 /**

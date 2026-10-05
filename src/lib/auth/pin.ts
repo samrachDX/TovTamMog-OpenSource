@@ -81,11 +81,12 @@ export async function setInitialPin(db: Db, employeeId: string, pin: unknown, ct
        where id = $1`,
       [employeeId, pinHash, now],
     );
-    // A credential change invalidates every other session.
+    // A credential change invalidates every other session and every remembered phone.
     await tx.query(
       `update sessions set revoked_at = $3 where employee_id = $1 and id <> $2 and revoked_at is null`,
       [employeeId, ctx.sessionId, now],
     );
+    await tx.query(`update trusted_devices set revoked_at = $2 where employee_id = $1 and revoked_at is null`, [employeeId, now]);
     await tx.query(`update sessions set pin_verified_at = $2 where id = $1`, [ctx.sessionId, now]);
     await recordAudit(tx, {
       orgId: emp.org_id,
@@ -173,6 +174,10 @@ export async function initiatePinReset(
     );
     if (!rows[0]) throw new AppError('BAD_REQUEST');
     await tx.query(`update sessions set revoked_at = $2 where employee_id = $1 and revoked_at is null`, [
+      args.employeeId,
+      now,
+    ]);
+    await tx.query(`update trusted_devices set revoked_at = $2 where employee_id = $1 and revoked_at is null`, [
       args.employeeId,
       now,
     ]);

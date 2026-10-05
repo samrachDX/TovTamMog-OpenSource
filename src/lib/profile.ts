@@ -14,18 +14,21 @@ export type Profile = {
   digits: Digits;
   notifyTelegram: boolean;
   timezone: string;
-  branches: { id: string; nameKm: string; nameEn: string; isPrimary: boolean }[];
+  /** The organization uses overnight shifts; off hides "next day" fields. */
+  nightShifts: boolean;
+  /** requireQr false: the Clock button can clock at that branch without scanning. */
+  branches: { id: string; nameKm: string; nameEn: string; isPrimary: boolean; requireQr: boolean }[];
 };
 
 export async function getProfile(db: Db, employeeId: string): Promise<Profile> {
   const rows = await db.query<{
     employee_code: string; name_km: string; name_en: string | null; photo_path: string | null;
     locale: string | null; digits: Digits | null; notify_telegram: boolean; photo_version: string | null; cat_km: string; cat_en: string;
-    default_locale: string; default_digits: Digits; timezone: string;
+    default_locale: string; default_digits: Digits; timezone: string; night_shifts_enabled: boolean;
   }>(
     `select e.employee_code, e.name_km, e.name_en, e.photo_path, e.locale, e.digits, e.notify_telegram,
             (select extract(epoch from f.uploaded_at)::bigint::text from employee_files f where f.employee_id = e.id and f.kind = 'photo') as photo_version,
-            c.name_km as cat_km, c.name_en as cat_en, o.default_locale, o.default_digits, o.timezone
+            c.name_km as cat_km, c.name_en as cat_en, o.default_locale, o.default_digits, o.timezone, o.night_shifts_enabled
      from employees e
      join organizations o on o.id = e.org_id
      join employee_categories c on c.org_id = e.org_id and c.key = e.category
@@ -34,8 +37,8 @@ export async function getProfile(db: Db, employeeId: string): Promise<Profile> {
   );
   const e = rows[0];
   if (!e) throw new AppError('UNAUTHENTICATED');
-  const branches = await db.query<{ id: string; name_km: string; name_en: string; is_primary: boolean; locale: string | null; timezone: string }>(
-    `select b.id, b.name_km, b.name_en, eb.is_primary, b.locale, b.timezone
+  const branches = await db.query<{ id: string; name_km: string; name_en: string; is_primary: boolean; locale: string | null; timezone: string; require_qr: boolean }>(
+    `select b.id, b.name_km, b.name_en, eb.is_primary, b.locale, b.timezone, b.require_qr
      from employee_branches eb join branches b on b.id = eb.branch_id
      where eb.employee_id = $1 and b.status = 'active'
      order by eb.is_primary desc, b.name_en`,
@@ -54,7 +57,8 @@ export async function getProfile(db: Db, employeeId: string): Promise<Profile> {
     digits: e.digits ?? e.default_digits,
     notifyTelegram: e.notify_telegram,
     timezone: primary?.timezone ?? e.timezone,
-    branches: branches.map((b) => ({ id: b.id, nameKm: b.name_km, nameEn: b.name_en, isPrimary: b.is_primary })),
+    nightShifts: e.night_shifts_enabled,
+    branches: branches.map((b) => ({ id: b.id, nameKm: b.name_km, nameEn: b.name_en, isPrimary: b.is_primary, requireQr: b.require_qr })),
   };
 }
 

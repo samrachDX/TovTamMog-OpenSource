@@ -1,6 +1,7 @@
 import { db } from '@/lib/db';
 import { setInitialPin } from '@/lib/auth/pin';
-import { clientIp, handle, json, readJson, sessionFrom } from '@/lib/http';
+import { rememberDevice } from '@/lib/auth/session';
+import { authConfig, clientIp, handle, json, readJson, requestMeta, sessionFrom } from '@/lib/http';
 
 /** Creates the PIN on first use or after an HR-initiated reset. */
 export function POST(req: Request) {
@@ -8,6 +9,8 @@ export function POST(req: Request) {
     const session = await sessionFrom(req);
     const body = await readJson(req);
     await setInitialPin(db, session.employeeId, body.pin, { sessionId: session.id, ip: clientIp(req) });
-    return json({ state: 'ready' });
+    // The Mini App asks to be remembered on this phone; the portal does not.
+    const deviceToken = body.remember === true ? await rememberDevice(db, authConfig(), session, requestMeta(req)) : null;
+    return json({ state: 'ready', deviceToken });
   });
 }

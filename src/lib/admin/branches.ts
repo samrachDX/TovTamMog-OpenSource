@@ -12,7 +12,7 @@ type Input = Record<string, unknown>;
 
 const COLUMNS = `b.id, b.code, b.name_km, b.name_en, b.address_km, b.address_en, b.phone, b.status, b.timezone,
   b.locale, b.manager_employee_id, b.latitude, b.longitude, b.geofence_radius_m, b.max_accuracy_m,
-  b.max_location_age_s, b.require_ip, b.require_gps, b.require_shift, b.early_clock_in_minutes,
+  b.max_location_age_s, b.require_ip, b.require_gps, b.require_qr, b.require_shift, b.early_clock_in_minutes,
   b.late_grace_minutes, b.early_leave_grace_minutes, b.missed_clock_out_minutes, b.unscheduled_max_minutes`;
 
 type Row = {
@@ -20,7 +20,7 @@ type Row = {
   phone: string | null; status: 'active' | 'inactive'; timezone: string; locale: string | null;
   manager_employee_id: string | null; latitude: number | null; longitude: number | null;
   geofence_radius_m: number; max_accuracy_m: number; max_location_age_s: number; require_ip: boolean;
-  require_gps: boolean; require_shift: boolean; early_clock_in_minutes: number; late_grace_minutes: number;
+  require_gps: boolean; require_qr: boolean; require_shift: boolean; early_clock_in_minutes: number; late_grace_minutes: number;
   early_leave_grace_minutes: number; missed_clock_out_minutes: number; unscheduled_max_minutes: number;
 };
 
@@ -33,7 +33,7 @@ function shape(r: Row) {
     policy: {
       latitude: r.latitude, longitude: r.longitude, geofenceRadiusM: r.geofence_radius_m,
       maxAccuracyM: r.max_accuracy_m, maxLocationAgeS: r.max_location_age_s, requireIp: r.require_ip,
-      requireGps: r.require_gps, requireShift: r.require_shift, earlyClockInMinutes: r.early_clock_in_minutes,
+      requireGps: r.require_gps, requireQr: r.require_qr, requireShift: r.require_shift, earlyClockInMinutes: r.early_clock_in_minutes,
       lateGraceMinutes: r.late_grace_minutes, earlyLeaveGraceMinutes: r.early_leave_grace_minutes,
       missedClockOutMinutes: r.missed_clock_out_minutes, unscheduledMaxMinutes: r.unscheduled_max_minutes,
     },
@@ -201,13 +201,14 @@ export async function updateBranchSecurity(db: Db, actor: Actor, id: string, inp
       max_location_age_s: has('maxLocationAgeS') ? int(input, 'maxLocationAgeS', 10, 3600) : before.max_location_age_s,
       require_ip: has('requireIp') ? bool(input, 'requireIp') : before.require_ip,
       require_gps: has('requireGps') ? bool(input, 'requireGps') : before.require_gps,
+      require_qr: has('requireQr') ? bool(input, 'requireQr') : before.require_qr,
     };
     if ((next.latitude === null) !== (next.longitude === null)) throw new AppError('VALIDATION', { field: 'latitude' });
     await tx.query(
       `update branches set latitude = $2, longitude = $3, geofence_radius_m = $4, max_accuracy_m = $5,
-         max_location_age_s = $6, require_ip = $7, require_gps = $8, updated_at = $9 where id = $1`,
+         max_location_age_s = $6, require_ip = $7, require_gps = $8, require_qr = $10, updated_at = $9 where id = $1`,
       [id, next.latitude, next.longitude, next.geofence_radius_m, next.max_accuracy_m, next.max_location_age_s,
-        next.require_ip, next.require_gps, actor.now ?? new Date()],
+        next.require_ip, next.require_gps, actor.now ?? new Date(), next.require_qr],
     );
     const keys = Object.keys(next) as (keyof typeof next)[];
     await recordAudit(tx, {

@@ -14,8 +14,10 @@ export type ClockInput = {
   employeeId: string;
   sessionId: string;
   action: ClockAction;
-  /** Opaque branch identifier read from the QR code. */
-  qrPublicId: string;
+  /** Opaque branch identifier read from the QR code; null when clocking without a scan. */
+  qrPublicId: string | null;
+  /** Without a scan: the branch to clock at. Accepted only where the branch does not require the QR. */
+  branchId?: string | null;
   /** Generated once per tap by the client; retries reuse it. */
   idempotencyKey: string;
   /** Determined by the server from trusted infrastructure headers. Never client supplied. */
@@ -52,6 +54,7 @@ export type ClockResult =
   | { ok: false; failures: ErrorCode[]; attemptId: string | null; branch: BranchSummary | null };
 
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9_-]{16,64}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CLOCK_ATTEMPTS_PER_MINUTE = 12;
 
 /** Failures that suggest misuse rather than an honest mistake. */
@@ -59,6 +62,7 @@ const SUSPICIOUS: ReadonlySet<ErrorCode> = new Set([
   'EMPLOYEE_INACTIVE',
   'QR_UNKNOWN',
   'QR_REVOKED',
+  'QR_REQUIRED',
   'BRANCH_NOT_AUTHORIZED',
   'IP_MISSING',
   'IP_NOT_ALLOWED',
@@ -113,6 +117,7 @@ type BranchRow = {
   max_location_age_s: number;
   require_ip: boolean;
   require_gps: boolean;
+  require_qr: boolean;
   require_shift: boolean;
   early_clock_in_minutes: number;
   late_grace_minutes: number;
@@ -172,7 +177,7 @@ export async function clock(db: Db, input: ClockInput): Promise<ClockResult> {
          values ($1, $2, $3, $4, 'rejected', $5, $6, $7, $8, $9, $10, $11, $12) returning id`,
         [
           emp.org_id, emp.id, branch?.id ?? null, input.action, failures,
-          input.qrPublicId.slice(0, 64), input.sourceIp,
+          input.qrPublicId?.slice(0, 64) ?? null, input.sourceIp,
           finiteOrNull(loc?.latitude), finiteOrNull(loc?.longitude), finiteOrNull(loc?.accuracyM),
           distanceM, now,
         ],
@@ -219,19 +224,28 @@ export async function clock(db: Db, input: ClockInput): Promise<ClockResult> {
     if (emp.status !== 'active') failures.push('EMPLOYEE_INACTIVE');
 
     // The QR only names a branch. It must exist inside the employee's own organization.
-    const branches = await tx.query<BranchRow>(
-      `select b.id, b.name_km, b.name_en, b.timezone, b.status, q.status as qr_status,
+    // Without a scan the branch is named directly, which only a branch that does not require the QR accepts.
+    const POLICY = `b.id, b.name_km, b.name_en, b.timezone, b.status,
               b.latitude, b.longitude, b.geofence_radius_m, b.max_accuracy_m, b.max_location_age_s,
-              b.require_ip, b.require_gps, b.require_shift, b.early_clock_in_minutes,
+              b.require_ip, b.require_gps, b.require_qr, b.require_shift, b.early_clock_in_minutes,
               b.late_grace_minutes, b.early_leave_grace_minutes, b.missed_clock_out_minutes,
-              b.unscheduled_max_minutes
-       from branch_qr_codes q join branches b on b.id = q.branch_id
-       where q.public_id = $1 and b.org_id = $2`,
-      [input.qrPublicId, emp.org_id],
-    );
-    if (!branches[0]) return reject([...failures, 'QR_UNKNOWN']);
+              b.unscheduled_max_minutes`;
+    const branches = input.qrPublicId !== null
+      ? await tx.query<BranchRow>(
+        `select ${POLICY}, q.status as qr_status
+         from branch_qr_codes q join branches b on b.id = q.branch_id
+         where q.public_id = $1 and b.org_id = $2`,
+        [input.qrPublicId, emp.org_id],
+      )
+      : input.branchId && UUID.test(input.branchId)
+        ? await tx.query<BranchRow>(`select ${POLICY}, 'active' as qr_status from branches b where b.id = $1 and b.org_id = $2`, [
+          input.branchId, emp.org_id,
+        ])
+        : [];
+    if (!branches[0]) return reject([...failures, input.qrPublicId !== null ? 'QR_UNKNOWN' : 'BRANCH_NOT_AUTHORIZED']);
     branch = branches[0];
     if (branch.qr_status !== 'active') failures.push('QR_REVOKED');
+    if (input.qrPublicId === null && branch.require_qr) failures.push('QR_REQUIRED');
     if (branch.status !== 'active') failures.push('BRANCH_INACTIVE');
 
     const assigned = await tx.query(

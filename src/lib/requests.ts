@@ -7,6 +7,7 @@ import { can } from '@/lib/auth/permissions';
 import { hitRateLimit } from '@/lib/auth/rate-limit';
 import { expectedHours, recomputeLateness } from '@/lib/attendance/leave';
 import { sniffContentType } from '@/lib/admin/files';
+import { requireNightShifts } from '@/lib/admin/settings';
 import { earlyLeaveMinutes, lateMinutes } from '@/lib/attendance/timing';
 import { DATE, TIME, date, oneOf, optText, optUuid, paging, requireCan, scopeOf, text, time, uuid, type Actor } from '@/lib/admin/actor';
 
@@ -206,6 +207,7 @@ export async function createRequest(
       startTime = time(input, 'startTime');
       endTime = time(input, 'endTime');
       if (startTime === endTime) throw new AppError('INVALID_TIME_RANGE');
+      if (endTime < startTime) await requireNightShifts(tx, who.orgId);
       const span = overtimeSpan(startTime, endTime);
       if (span.to - span.from > MAX_OVERTIME_MINUTES) throw new AppError('INVALID_TIME_RANGE');
       const offset = (Date.parse(`${startDate}T00:00:00Z`) - Date.parse(`${now.toISOString().slice(0, 10)}T00:00:00Z`)) / 86_400_000;

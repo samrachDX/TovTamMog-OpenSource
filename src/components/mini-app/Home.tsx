@@ -16,7 +16,8 @@ export type Me = {
     nameKm: string;
     nameEn: string | null;
     category: { km: string; en: string };
-    branches: { id: string; nameKm: string; nameEn: string; isPrimary: boolean }[];
+    branches: { id: string; nameKm: string; nameEn: string; isPrimary: boolean; requireQr: boolean }[];
+    nightShifts: boolean;
     notifyTelegram: boolean;
     photoVersion: string | null;
   };
@@ -52,7 +53,7 @@ const STATE_TONE: Record<Me['overview']['state'], string> = {
 };
 
 export function Home({ me, onClock, onRequest }: {
-  me: Me; onClock(action: 'clock_in' | 'clock_out'): void; onRequest(kind: RequestKind, record?: RecordRef, focus?: ClockFocus): void;
+  me: Me; onClock(action: 'clock_in' | 'clock_out', branchId?: string): void; onRequest(kind: RequestKind, record?: RecordRef, focus?: ClockFocus): void;
 }) {
   const [choosing, setChoosing] = useState(false);
   const { t, locale, timeZone, time, longDate } = useI18n();
@@ -69,6 +70,8 @@ export function Home({ me, onClock, onRequest }: {
   const branchById = (id: string | undefined) => profile.branches.find((b) => b.id === id);
   const branch = branchById(overview.record?.branchId ?? overview.shift?.branchId) ?? profile.branches[0];
   const { record, shift } = overview;
+  // This branch lets staff clock from the button without scanning its QR code.
+  const noScan = !!branch && !branch.requireQr;
 
   return (
     <>
@@ -142,7 +145,12 @@ export function Home({ me, onClock, onRequest }: {
           {choosing ? (
             // Scanning is the normal way; someone who forgot and is no longer at the branch sends the real time instead.
             <section aria-label={t(overview.nextAction === 'clock_in' ? 'attendance.clockIn' : 'attendance.clockOut')} className="flex flex-col gap-2 rounded-2xl border border-line p-3">
-              <Button className="min-h-14" onClick={() => { setChoosing(false); onClock(overview.nextAction!); }}>
+              {noScan ? (
+                <Button className="min-h-14" onClick={() => { setChoosing(false); onClock(overview.nextAction!, branch.id); }}>
+                  {t(overview.nextAction === 'clock_in' ? 'attendance.choose.nowIn' : 'attendance.choose.nowOut')}
+                </Button>
+              ) : null}
+              <Button variant={noScan ? 'secondary' : undefined} className="min-h-14" onClick={() => { setChoosing(false); onClock(overview.nextAction!); }}>
                 {t('attendance.choose.scan')}
               </Button>
               <Button
@@ -165,7 +173,7 @@ export function Home({ me, onClock, onRequest }: {
               <Button className="min-h-16 text-lg" onClick={() => setChoosing(true)}>
                 {t(overview.nextAction === 'clock_in' ? 'attendance.clockIn' : 'attendance.clockOut')}
               </Button>
-              <p className="text-center text-sm text-muted">{t('attendance.scanHint')}</p>
+              <p className="text-center text-sm text-muted">{t(noScan ? 'attendance.noScanHint' : 'attendance.scanHint')}</p>
             </>
           )}
         </div>

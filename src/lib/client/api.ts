@@ -35,12 +35,42 @@ export function setToken(token: string | null): void {
   }
 }
 
+const DEVICE_KEY = 'ttm.device';
+
+/**
+ * Proof that the PIN was entered on this phone recently. It outlives the tab, so reopening
+ * the Mini App skips the PIN until the organization's remember period runs out.
+ */
+export function getDeviceToken(): string | null {
+  try {
+    return window.localStorage.getItem(DEVICE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setDeviceToken(token: string | null | undefined): void {
+  try {
+    if (token) window.localStorage.setItem(DEVICE_KEY, token);
+    else window.localStorage.removeItem(DEVICE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Signs out here and on the server. The local token goes even if the server cannot be reached. */
 export function signOut(): void {
   const token = getToken();
+  const deviceToken = getDeviceToken();
   setToken(null);
+  setDeviceToken(null);
   if (token) {
-    void fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, keepalive: true }).catch(() => {});
+    void fetch('/api/auth/logout', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ deviceToken }),
+      keepalive: true,
+    }).catch(() => {});
   }
 }
 

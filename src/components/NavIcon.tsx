@@ -18,6 +18,8 @@ const PATHS = {
   leaveTypes: 'M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8ZM7.5 7.5h.01',
   // A bar chart: reports.
   reports: 'M3 3v18h18M8 17v-5M13 17V8M18 17v-8',
+  // Sliders: settings.
+  settings: 'M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4',
   audit: 'M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8l-5-5ZM14 3v5h5M9 13h6M9 17h6',
 } as const;
 

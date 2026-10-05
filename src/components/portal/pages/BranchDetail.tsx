@@ -16,7 +16,7 @@ import {
 
 type Policy = {
   latitude: number | null; longitude: number | null; geofenceRadiusM: number; maxAccuracyM: number;
-  maxLocationAgeS: number; requireIp: boolean; requireGps: boolean; requireShift: boolean;
+  maxLocationAgeS: number; requireIp: boolean; requireGps: boolean; requireQr: boolean; requireShift: boolean;
   earlyClockInMinutes: number; lateGraceMinutes: number; earlyLeaveGraceMinutes: number; missedClockOutMinutes: number;
 };
 type Detail = {
@@ -196,6 +196,7 @@ function SecurityCard({ b, reload }: CardProps) {
     latitude: (b.policy.latitude ?? '') as number | '', longitude: (b.policy.longitude ?? '') as number | '',
     geofenceRadiusM: b.policy.geofenceRadiusM as number | '', maxAccuracyM: b.policy.maxAccuracyM as number | '',
     maxLocationAgeS: b.policy.maxLocationAgeS as number | '', requireIp: b.policy.requireIp, requireGps: b.policy.requireGps,
+    requireQr: b.policy.requireQr,
   });
   const [ask, setAsk] = useState(false);
   const [locating, setLocating] = useState(false);
@@ -204,7 +205,7 @@ function SecurityCard({ b, reload }: CardProps) {
   const n = (k: 'latitude' | 'longitude' | 'geofenceRadiusM' | 'maxAccuracyM' | 'maxLocationAgeS', label: string, o: { min: number; max: number; step?: string; hint?: string }) => (
     <NumberField label={label} hint={o.hint} min={o.min} max={o.max} step={o.step} disabled={ro} value={f[k]} onChange={(v) => setF((x) => ({ ...x, [k]: v }))} />
   );
-  const weakened = (b.policy.requireIp && !f.requireIp) || (b.policy.requireGps && !f.requireGps);
+  const weakened = (b.policy.requireIp && !f.requireIp) || (b.policy.requireGps && !f.requireGps) || (b.policy.requireQr && !f.requireQr);
   return (
     <Card title={t('portal.branch.security')}>
       <form onSubmit={(e) => { e.preventDefault(); setAsk(true); }}>
@@ -239,7 +240,9 @@ function SecurityCard({ b, reload }: CardProps) {
         <div className="mt-2">
           <Check label={t('portal.branch.requireIp')} checked={f.requireIp} disabled={ro} onChange={(v) => setF((x) => ({ ...x, requireIp: v }))} />
           <Check label={t('portal.branch.requireGps')} checked={f.requireGps} disabled={ro} onChange={(v) => setF((x) => ({ ...x, requireGps: v }))} />
+          <Check label={t('portal.branch.requireQr')} checked={f.requireQr} disabled={ro} onChange={(v) => setF((x) => ({ ...x, requireQr: v }))} />
         </div>
+        {!f.requireQr ? <Notice tone="info">{t('portal.branch.noQrNote')}</Notice> : null}
         {f.requireGps && (f.latitude === '' || f.longitude === '') ? <Notice tone="warning">{t('portal.branch.gpsUnsetNote')}</Notice> : null}
         {weakened ? <Notice tone="warning">{t('portal.branch.weakenNote')}</Notice> : null}
         {error ? <Notice tone="danger">{error}</Notice> : null}

@@ -179,6 +179,26 @@ describe('policy switches', () => {
     expect(r.ok).toBe(true);
   });
 
+  it('clocks without a scan only where the branch does not require the QR', async () => {
+    const noScan = (now: Date, over: Partial<ClockInput> = {}) => input(now, { qrPublicId: null, branchId: f.branchId, ...over });
+    expect(failures(await clock(db, noScan(at(0))))).toEqual(['QR_REQUIRED']);
+    expect(failures(await clock(db, input(at(0), { qrPublicId: null })))).toEqual(['BRANCH_NOT_AUTHORIZED']);
+    expect(await count('attendance_records')).toBe(0);
+
+    await db.query(`update branches set require_qr = false where id = $1`, [f.branchId]);
+    // Location and network checks still apply.
+    expect(failures(await clock(db, noScan(at(0), { location: null })))).toEqual(['LOCATION_REQUIRED']);
+    // A branch the employee is not assigned to is still refused.
+    await db.query(`update branches set require_qr = false where id = $1`, [f.otherBranchId]);
+    expect(failures(await clock(db, noScan(at(0), { branchId: f.otherBranchId })))).toContain('BRANCH_NOT_AUTHORIZED');
+
+    const cin = await clock(db, noScan(at(5)));
+    expect(cin.ok && cin.record).toMatchObject({ status: 'clocked_in', lateMinutes: 0 });
+    const cout = await clock(db, noScan(at(480), { action: 'clock_out' }));
+    expect(cout.ok && cout.record).toMatchObject({ status: 'completed', workedMinutes: 475 });
+    expect(await count('attendance_events', 'qr_public_id is null')).toBe(2);
+  });
+
   it('allows unscheduled clock-in when shifts are not required', async () => {
     await db.query(`update branches set require_shift = false where id = $1`, [f.branchId]);
     const now = new Date('2026-10-06T17:30:00Z'); // 00:30 on 7 Oct local

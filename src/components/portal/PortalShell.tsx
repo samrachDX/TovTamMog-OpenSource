@@ -17,6 +17,7 @@ export type PortalMe = {
   employeeId: string;
   profile: { employeeCode: string; nameKm: string; nameEn: string | null; locale: Locale; digits: Digits; timezone: string };
   grants: { permission: string; branchId: string | null }[];
+  settings: { nightShifts: boolean };
   rank: number;
   branches: (Named & { status: string })[];
   categories: { key: string; nameKm: string; nameEn: string }[];
@@ -43,7 +44,7 @@ export function usePortal(): Portal {
 }
 
 /** Pages about the whole organization, shown only to people who hold the permission org-wide. */
-const ORG_WIDE = new Set(['audit.view', 'leave_type.manage']);
+const ORG_WIDE = new Set(['audit.view', 'leave_type.manage', 'security.settings.manage']);
 
 type NavItem = { href: string; label: MessageKey; icon: NavIconName; permission: string };
 
@@ -70,6 +71,7 @@ const NAV: { title: MessageKey; items: NavItem[] }[] = [
       { href: '/admin/branches', label: 'nav.branches', icon: 'branches', permission: 'branch.view' },
       { href: '/admin/roles', label: 'nav.roles', icon: 'roles', permission: 'role.manage' },
       { href: '/admin/audit', label: 'nav.audit', icon: 'audit', permission: 'audit.view' },
+      { href: '/admin/settings', label: 'nav.settings', icon: 'settings', permission: 'security.settings.manage' },
     ],
   },
 ];

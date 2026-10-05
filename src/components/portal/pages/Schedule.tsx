@@ -452,6 +452,7 @@ function TemplateDialog({
   open: boolean; template?: Template; branchId: string; onClose(): void; onSaved(message?: string): void;
 }) {
   const { t, locale, num, errorText } = useI18n();
+  const { me } = usePortal();
   const [f, setF] = useState(() => ({
     nameKm: template?.nameKm ?? '', nameEn: template?.nameEn ?? '',
     startTime: template?.startTime ?? '08:00', endTime: template?.endTime ?? '16:00',
@@ -486,7 +487,7 @@ function TemplateDialog({
           <Field label={t('portal.nameKm')}><TextInput required lang="km" maxLength={80} value={f.nameKm} onChange={(e) => set('nameKm', e.target.value)} /></Field>
           <Field label={t('portal.nameEn')}><TextInput required lang="en" maxLength={80} value={f.nameEn} onChange={(e) => set('nameEn', e.target.value)} /></Field>
           <Field label={t('portal.sched.start')}><TextInput required type="time" value={f.startTime} onChange={(e) => set('startTime', e.target.value)} /></Field>
-          <Field label={t('portal.sched.end')} hint={f.endTime <= f.startTime ? t('portal.sched.overnightHint') : undefined}>
+          <Field label={t('portal.sched.end')} hint={f.endTime <= f.startTime ? t(me.settings.nightShifts ? 'portal.sched.overnightHint' : 'portal.sched.nightOff') : undefined}>
             <TextInput required type="time" value={f.endTime} onChange={(e) => set('endTime', e.target.value)} />
           </Field>
         </div>
@@ -514,7 +515,7 @@ function AssignDialog({
   onClose(): void; onDone(message: string): void;
 }) {
   const { t, locale, day, errorText } = useI18n();
-  const { name } = usePortal();
+  const { me, name } = usePortal();
   const [templateId, setTemplateId] = useState(templates[0]?.id ?? '');
   const [startTime, setStartTime] = useState('08:00');
   const [endTime, setEndTime] = useState('16:00');
@@ -556,7 +557,7 @@ function AssignDialog({
         {!templateId ? (
           <div className="grid grid-cols-2 gap-3">
             <Field label={t('portal.sched.start')}><TextInput required type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} /></Field>
-            <Field label={t('portal.sched.end')} hint={endTime <= startTime ? t('portal.sched.overnightHint') : undefined}>
+            <Field label={t('portal.sched.end')} hint={endTime <= startTime ? t(me.settings.nightShifts ? 'portal.sched.overnightHint' : 'portal.sched.nightOff') : undefined}>
               <TextInput required type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
             </Field>
           </div>

@@ -43,8 +43,11 @@ function nextDay(day: string): string {
  * One form for every request type. Leave and absence take dates; the record-based types
  * are opened from a history entry and take the corrected times for that day.
  */
-export function RequestForm({ kind, record, focus, onDone }: {
-  kind: RequestKind; record?: RecordRef; focus?: ClockFocus; onDone(saved: boolean): void;
+export function RequestForm({ kind, record, focus, nightShifts = false, onDone }: {
+  kind: RequestKind; record?: RecordRef; focus?: ClockFocus;
+  /** The organization uses overnight shifts: offers "next day" clock-outs and overtime past midnight. */
+  nightShifts?: boolean;
+  onDone(saved: boolean): void;
 }) {
   const { t, locale, timeZone, day, time, num, errorText } = useI18n();
   const today = localDate(new Date(), timeZone);
@@ -139,7 +142,7 @@ export function RequestForm({ kind, record, focus, onDone }: {
   const leaveOk = kind !== 'leave' || (unit === 'day' ? endDate >= startDate : unit === 'hours' ? toTime > fromTime : true);
   const typeOk = kind !== 'leave' || (!!typeId && (!needsFile || files.length > 0));
   const otMinutes = overtimeMinutes(otFrom, otTo);
-  const otOk = kind !== 'overtime' || (otFrom !== otTo && otMinutes <= 12 * 60);
+  const otOk = kind !== 'overtime' || (otFrom !== otTo && otMinutes <= 12 * 60 && (nightShifts || otTo > otFrom));
   const valid = reason.trim().length >= 3 && timesOk && leaveOk && typeOk && otOk;
 
   const submit = async () => {
@@ -287,7 +290,7 @@ export function RequestForm({ kind, record, focus, onDone }: {
           <p className={`rounded-xl px-3 py-2 text-sm ${otOk ? 'bg-pale' : 'bg-danger-pale text-danger'}`}>
             {otOk
               ? t('requests.otTotal', { hours: num(Math.floor(otMinutes / 60)), minutes: num(String(otMinutes % 60).padStart(2, '0')) })
-              : t('errors.INVALID_TIME_RANGE')}
+              : t(!nightShifts && otTo < otFrom ? 'errors.NIGHT_SHIFTS_OFF' : 'errors.INVALID_TIME_RANGE')}
             {otOk && otTo <= otFrom ? ` · ${t('requests.otNextDay')}` : ''}
           </p>
           <p className="text-sm text-muted">{t('requests.otNote')}</p>
@@ -317,10 +320,12 @@ export function RequestForm({ kind, record, focus, onDone }: {
           <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t(missedIn ? 'requests.outOptional' : openShift && !onlyOut ? 'attendance.forgot.actualOut' : 'requests.correctOut')}</span>
             <input type="time" required={needsOut || onlyOut} className={INPUT} value={clockOut} onChange={(e) => setClockOut(e.target.value)} />
           </label>
-          <label className="flex min-h-11 items-center gap-3 text-sm">
-            <input type="checkbox" className="size-5" checked={outNextDay} onChange={(e) => setOutNextDay(e.target.checked)} />
-            <span>{t('requests.outNextDay')}</span>
-          </label>
+          {nightShifts ? (
+            <label className="flex min-h-11 items-center gap-3 text-sm">
+              <input type="checkbox" className="size-5" checked={outNextDay} onChange={(e) => setOutNextDay(e.target.checked)} />
+              <span>{t('requests.outNextDay')}</span>
+            </label>
+          ) : null}
         </>
       ) : null}
 

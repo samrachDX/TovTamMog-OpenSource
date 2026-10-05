@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ApiError, api, getToken, setToken } from '@/lib/client/api';
+import { ApiError, api, getDeviceToken, getToken, setDeviceToken, setToken } from '@/lib/client/api';
 import { telegram } from '@/lib/client/telegram';
 import type { Digits, Locale } from '@/lib/i18n';
 import { Brand } from '@/components/Brand';
@@ -26,7 +26,7 @@ type Phase =
   | { name: 'pin_required' }
   | { name: 'ready'; me: Me; tab: Tab }
   | { name: 'request'; me: Me; back: Tab; kind: RequestKind; record?: RecordRef; focus?: ClockFocus }
-  | { name: 'clocking'; me: Me; action: 'clock_in' | 'clock_out' }
+  | { name: 'clocking'; me: Me; action: 'clock_in' | 'clock_out'; branchId?: string }
   | { name: 'error'; message: string };
 
 type Tab = 'home' | 'history' | 'requests' | 'inbox';
@@ -70,7 +70,7 @@ function Flow() {
   const signIn = useCallback(async (): Promise<void> => {
     const tg = telegram();
     if (!tg) return setPhase({ name: 'no_telegram' });
-    const res = await api<AuthResponse>('/api/auth/telegram', { body: { initData: tg.initData }, locale, auth: false });
+    const res = await api<AuthResponse>('/api/auth/telegram', { body: { initData: tg.initData, deviceToken: getDeviceToken() }, locale, auth: false });
     if (res.state === 'not_enrolled') return setPhase({ name: 'not_enrolled' });
     setToken(res.token ?? null);
     await loadMe();
@@ -218,7 +218,7 @@ function Flow() {
               // Back to the first entry whether or not the server accepts the PIN.
               setPhase({ name: 'pin_setup' });
               void run(async () => {
-                await api('/api/auth/pin/setup', { body: { pin }, locale });
+                setDeviceToken((await api<{ deviceToken: string | null }>('/api/auth/pin/setup', { body: { pin, remember: true }, locale })).deviceToken);
                 await loadMe();
               });
             }}
@@ -237,7 +237,7 @@ function Flow() {
             busy={busy}
             onComplete={(pin) =>
               void run(async () => {
-                await api('/api/auth/pin', { body: { pin }, locale });
+                setDeviceToken((await api<{ deviceToken: string | null }>('/api/auth/pin', { body: { pin, remember: true }, locale })).deviceToken);
                 await loadMe();
               })
             }
@@ -253,7 +253,7 @@ function Flow() {
           {error ? <Notice tone="danger">{error}</Notice> : null}
           {tab === 'home' ? <Home
               me={me}
-              onClock={(action) => setPhase({ name: 'clocking', me, action })}
+              onClock={(action, branchId) => setPhase({ name: 'clocking', me, action, branchId })}
               onRequest={(kind, record, focus) => setPhase({ name: 'request', me, back: 'home', kind, record, focus })}
             /> : null}
           {tab === 'history' ? <History onRequest={(kind, record) => setPhase({ name: 'request', me, back: 'history', kind, record })} /> : null}
@@ -277,6 +277,7 @@ function Flow() {
             kind={phase.kind}
             record={phase.record}
             focus={phase.focus}
+            nightShifts={phase.me.profile.nightShifts}
             // After sending, show the list of requests; after cancelling, go back where they were.
             onDone={(saved) => setPhase({ name: 'ready', me: phase.me, tab: saved ? 'requests' : phase.back })}
           />
@@ -287,6 +288,7 @@ function Flow() {
       return (
         <ClockFlow
           action={phase.action}
+          branchId={phase.branchId}
           onDone={(changed) => {
             // Show the previous data immediately, then replace it with what the server has.
             setPhase({ name: 'ready', me: phase.me, tab: 'home' });

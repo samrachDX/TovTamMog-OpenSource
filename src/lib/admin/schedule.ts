@@ -3,6 +3,7 @@ import { AppError } from '@/lib/errors';
 import { recordAudit } from '@/lib/audit';
 import { dmy, notify } from '@/lib/notifications';
 import { generateWeeklyShifts, refreshTemplateSchedules } from './weekly';
+import { requireNightShifts } from './settings';
 import {
   bool, date, int, optUuid, reason, requireCan, text, time, uuid, uuidList, DATE, type Actor,
 } from './actor';
@@ -52,6 +53,7 @@ export async function saveTemplate(db: Db, actor: Actor, input: Input): Promise<
     active: input.active === undefined ? true : bool(input, 'active'),
   };
   if (data.startTime === data.endTime) throw new AppError('INVALID_TIME_RANGE');
+  if (data.endTime < data.startTime) await requireNightShifts(db, actor.orgId);
   return db.tx(async (tx) => {
     let saved: string;
     let refreshed: { schedules: number; shifts: number } | undefined;
@@ -169,6 +171,7 @@ export async function createAssignments(db: Db, actor: Actor, input: Input): Pro
       endTime = time(input, 'endTime');
     }
     if (startTime === endTime) throw new AppError('INVALID_TIME_RANGE');
+    if (endTime < startTime) await requireNightShifts(tx, actor.orgId);
 
     const members = await tx.query<{ employee_id: string }>(
       `select eb.employee_id from employee_branches eb join employees e on e.id = eb.employee_id

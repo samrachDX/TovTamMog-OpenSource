@@ -30,14 +30,19 @@ export function POST(req: Request) {
 
     const body = await readJson(req);
     if (body.action !== 'clock_in' && body.action !== 'clock_out') throw new AppError('BAD_REQUEST');
-    if (typeof body.qr !== 'string' || typeof body.idempotencyKey !== 'string') throw new AppError('BAD_REQUEST');
+    // A scanned QR names the branch; without a scan the app sends the branch, and the engine
+    // accepts that only where the branch does not require the QR.
+    const qr = typeof body.qr === 'string' ? body.qr : null;
+    const branchId = qr === null && typeof body.branchId === 'string' ? body.branchId : null;
+    if ((qr === null && branchId === null) || typeof body.idempotencyKey !== 'string') throw new AppError('BAD_REQUEST');
 
     const now = new Date();
     const result = await clock(db, {
       employeeId: session.employeeId,
       sessionId: session.id,
       action: body.action,
-      qrPublicId: body.qr,
+      qrPublicId: qr,
+      branchId,
       idempotencyKey: body.idempotencyKey,
       sourceIp: clientIp(req),
       location: parseLocation(body.location, now),

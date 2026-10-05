@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Db } from '@/lib/db/types';
 import {
-  authenticateTelegram, createEnrollmentCode, enrollWithCode, getSession, sessionState, type AuthResult,
+  authenticateTelegram, createEnrollmentCode, enrollWithCode, forgetDevice, getSession, rememberDevice, sessionState,
+  type AuthResult,
 } from '@/lib/auth/session';
 import { initiatePinReset, setInitialPin, verifyPin } from '@/lib/auth/pin';
 import { loadGrants, can, requirePermission } from '@/lib/auth/permissions';
@@ -176,6 +177,52 @@ describe('PIN and sessions', () => {
   it('rejects unknown tokens', async () => {
     await expect(getSession(db, cfg, 'x'.repeat(43), t0)).rejects.toThrow('UNAUTHENTICATED');
     await expect(getSession(db, cfg, null, t0)).rejects.toThrow('UNAUTHENTICATED');
+  });
+
+  it('a remembered phone opens without the PIN until the remember period ends', async () => {
+    const t = at(400);
+    const day = (n: number) => new Date(t.getTime() + n * 86_400_000);
+    const open = async (when: Date, device: string | null) => {
+      const r = await authenticateTelegram(db, cfg, initDataFor(TG, when), { now: when }, device);
+      return { state: r.state, session: await getSession(db, cfg, token(r), when) };
+    };
+    const signIn = async (when: Date) => {
+      const { session } = await open(when, null);
+      await verifyPin(db, f.employeeId, '593824', { sessionId: session.id, now: when });
+      return session;
+    };
+
+    // The PIN is entered once; the phone keeps the device token.
+    const device = (await rememberDevice(db, cfg, await signIn(t), { now: t }))!;
+    expect(device).toEqual(expect.any(String));
+    const [stored] = await db.query<{ token_hash: string }>(`select token_hash from trusted_devices`);
+    expect(stored.token_hash).not.toBe(device);
+
+    // Reopened over the next week: straight in.
+    expect((await open(day(1), device)).state).toBe('ready');
+    expect((await open(day(6.9), device)).session.pinVerified).toBe(true);
+    // A week after the PIN, it asks again. Without the token, or with a made-up one, it always asks.
+    expect((await open(day(7.1), device)).state).toBe('pin_required');
+    expect((await open(day(1), null)).state).toBe('pin_required');
+    expect((await open(day(1), 'y'.repeat(43))).state).toBe('pin_required');
+
+    // The organization's setting applies at once: shorter, or never.
+    const fresh = (await rememberDevice(db, cfg, await signIn(day(8)), { now: day(8) }))!;
+    await db.query(`update organizations set pin_remember_days = 1 where id = $1`, [f.orgId]);
+    expect((await open(day(9.5), fresh)).state).toBe('pin_required');
+    await db.query(`update organizations set pin_remember_days = 0 where id = $1`, [f.orgId]);
+    expect(await rememberDevice(db, cfg, await signIn(day(10)), { now: day(10) })).toBeNull();
+    expect((await open(day(8.5), fresh)).state).toBe('pin_required');
+    await db.query(`update organizations set pin_remember_days = 7 where id = $1`, [f.orgId]);
+
+    // Signing out forgets the phone; a PIN reset forgets every phone.
+    const a = (await rememberDevice(db, cfg, await signIn(day(11)), { now: day(11) }))!;
+    const b = (await rememberDevice(db, cfg, await signIn(day(11)), { now: day(11) }))!;
+    await forgetDevice(db, cfg, f.employeeId, a, day(11));
+    expect((await open(day(12), a)).state).toBe('pin_required');
+    expect((await open(day(12), b)).state).toBe('ready');
+    await initiatePinReset(db, { employeeId: f.employeeId, actorEmployeeId: f.employeeId, reason: 'ទូរសព្ទបាត់', now: day(12) });
+    expect((await open(day(12), b)).state).toBe('pin_setup');
   });
 });
 

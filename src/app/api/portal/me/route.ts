@@ -23,6 +23,7 @@ export function GET(req: Request) {
     return json({
       employeeId: actor.employeeId,
       profile: { employeeCode: profile.employeeCode, nameKm: profile.nameKm, nameEn: profile.nameEn, locale: profile.locale, digits: profile.digits, timezone: profile.timezone },
+      settings: { nightShifts: profile.nightShifts },
       grants: actor.grants,
       // The highest level this person holds organization-wide; limits the roles they can manage.
       rank: await actorRank(db, actor),

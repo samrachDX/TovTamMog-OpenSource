@@ -21,6 +21,9 @@ type Step =
 
 type ClockedRecord = { id: string; workDate: string; clockInAt: string; clockOutAt: string | null };
 
+/** Where the branch comes from: a scanned QR, or (where the branch allows it) the branch itself. */
+type Source = { qr: string } | { branchId: string };
+
 type Position = { latitude: number; longitude: number; accuracyM: number; ageMs: number };
 
 function browserPosition(): Promise<Position> {
@@ -72,19 +75,24 @@ function getPosition(): Promise<Position> {
 }
 
 /**
- * Scan → confirm branch → read location → submit. Success is shown only after the server
+ * Scan (or, at a branch that allows it, no scan) → confirm branch → read location → submit. Success is shown only after the server
  * has accepted the request. One idempotency key covers the whole attempt, so a retry
  * after a dropped connection cannot create a second record.
  */
-export function ClockFlow({ action, onDone }: { action: Action; onDone(changed: boolean): void }) {
+export function ClockFlow({ action, branchId, onDone }: {
+  action: Action;
+  /** Clock at this branch without scanning; only for a branch that does not require the QR. */
+  branchId?: string;
+  onDone(changed: boolean): void;
+}) {
   const { t, locale, time, errorText } = useI18n();
-  const [step, setStep] = useState<Step>({ name: 'scanning' });
+  const [step, setStep] = useState<Step>(branchId ? { name: 'resolving' } : { name: 'scanning' });
   const started = useRef(false);
-  const attempt = useRef<{ key: string; qr: string } | null>(null);
+  const attempt = useRef<{ key: string; source: Source } | null>(null);
   const name = (b: Named) => (locale === 'km-KH' ? b.nameKm : b.nameEn || b.nameKm);
 
   const submit = useCallback(
-    async (qr: string, key: string) => {
+    async (source: Source, key: string) => {
       const fail = (messages: string[], branch: Named | null = null, canRetry = true, reference?: string) =>
         setStep({ name: 'failed', branch, messages, reference, canRetry });
 
@@ -93,7 +101,7 @@ export function ClockFlow({ action, onDone }: { action: Action; onDone(changed: 
       let requireGps: boolean;
       try {
         const res = await api<{ branch: Named; requireGps: boolean }>('/api/attendance/branch', {
-          body: { qr },
+          body: source,
           locale,
         });
         ({ branch, requireGps } = res);
@@ -118,7 +126,7 @@ export function ClockFlow({ action, onDone }: { action: Action; onDone(changed: 
       setStep({ name: 'submitting', branch });
       try {
         const res = await api<{ record: ClockedRecord }>('/api/attendance/clock', {
-          body: { action, qr, idempotencyKey: key, location },
+          body: { action, ...source, idempotencyKey: key, location },
           locale,
         });
         telegram()?.HapticFeedback?.notificationOccurred('success');
@@ -152,15 +160,20 @@ export function ClockFlow({ action, onDone }: { action: Action; onDone(changed: 
     if (!qr) {
       return setStep({ name: 'failed', branch: null, messages: [t('attendance.qrNotRecognized')], canRetry: true });
     }
-    attempt.current = { key: crypto.randomUUID(), qr };
-    await submit(qr, attempt.current.key);
+    attempt.current = { key: crypto.randomUUID(), source: { qr } };
+    await submit(attempt.current.source, attempt.current.key);
   }, [t, onDone, submit]);
 
   useEffect(() => {
     if (started.current) return;
     started.current = true;
-    void scan();
-  }, [scan]);
+    if (branchId) {
+      attempt.current = { key: crypto.randomUUID(), source: { branchId } };
+      void submit(attempt.current.source, attempt.current.key);
+    } else {
+      void scan();
+    }
+  }, [scan, submit, branchId]);
 
   const title = t(action === 'clock_in' ? 'attendance.clockIn' : 'attendance.clockOut');
 
@@ -206,7 +219,7 @@ export function ClockFlow({ action, onDone }: { action: Action; onDone(changed: 
                 // Same scan, same key: if the earlier request did reach the server, the
                 // retry returns that result instead of recording a second time.
                 if (attempt.current) {
-                  void submit(attempt.current.qr, attempt.current.key);
+                  void submit(attempt.current.source, attempt.current.key);
                 } else {
                   void scan();
                 }

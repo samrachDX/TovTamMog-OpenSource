@@ -14,6 +14,7 @@ import {
 } from '@/lib/admin/schedule';
 import { getDashboard, listAttempts, listAttendance } from '@/lib/admin/attendance';
 import { listAudit } from '@/lib/admin/audit';
+import { updateSettings, getSettings } from '@/lib/admin/settings';
 import { clock } from '@/lib/attendance/engine';
 import { authenticateLoginWidget, authenticateTelegram, enrollWithCode, getSession } from '@/lib/auth/session';
 import { signLoginWidget } from '@/lib/telegram/init-data';
@@ -258,7 +259,17 @@ describe('schedule', () => {
     await expect(saveTemplate(db, manager, { branchId: f.branchId, nameKm: 'ក', nameEn: 'a', startTime: '08:00', endTime: '08:00' })).rejects.toThrow('INVALID_TIME_RANGE');
     await expect(saveTemplate(db, manager, { branchId: f.branchId, nameKm: 'ក', nameEn: 'a', startTime: '8am', endTime: '16:00' })).rejects.toThrow('VALIDATION');
     ({ id: templateId } = await saveTemplate(db, manager, { branchId: f.branchId, nameKm: 'វេនព្រឹក', nameEn: 'Morning', startTime: '08:00', endTime: '16:00' }));
-    await saveTemplate(db, manager, { branchId: f.branchId, nameKm: 'វេនយប់', nameEn: 'Night', startTime: '22:00', endTime: '06:00' });
+    // Overnight times need night shifts turned on in Settings.
+    const night = { branchId: f.branchId, nameKm: 'វេនយប់', nameEn: 'Night', startTime: '22:00', endTime: '06:00' };
+    await expect(saveTemplate(db, manager, night)).rejects.toThrow('NIGHT_SHIFTS_OFF');
+    await expect(updateSettings(db, manager, { nightShifts: true })).rejects.toThrow('FORBIDDEN');
+    expect(await getSettings(db, f.orgId)).toEqual({ nightShifts: false, pinRememberDays: 7 });
+    expect(await updateSettings(db, admin, { nightShifts: true })).toEqual({ nightShifts: true, pinRememberDays: 7 });
+    await expect(updateSettings(db, admin, { pinRememberDays: 31 })).rejects.toThrow('VALIDATION');
+    expect(await audits('organization.settings.update')).toEqual([
+      expect.objectContaining({ before: { nightShifts: false }, after: { nightShifts: true } }),
+    ]);
+    await saveTemplate(db, manager, night);
     const list = await listTemplates(db, manager, f.branchId);
     expect(list.map((t) => [t.nameEn, t.startTime, t.endTime, t.overnight])).toEqual([
       ['Morning', '08:00', '16:00', false], ['Night', '22:00', '06:00', true],

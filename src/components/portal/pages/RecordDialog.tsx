@@ -124,7 +124,7 @@ function Body({ record, onClose, onChanged }: { record: RecordSummary; onClose()
             <Field label={t('requests.correctIn')}><TextInput type="time" value={clockIn} onChange={(e) => setClockIn(e.target.value)} /></Field>
             <Field label={t('requests.correctOut')}><TextInput type="time" value={clockOut} onChange={(e) => setClockOut(e.target.value)} /></Field>
           </div>
-          <Check label={t('requests.outNextDay')} checked={outNextDay} onChange={setOutNextDay} />
+          {me.settings.nightShifts ? <Check label={t('requests.outNextDay')} checked={outNextDay} onChange={setOutNextDay} /> : null}
           <Field label={t('portal.reason')} hint={t('portal.reasonHint')}>
             <textarea required minLength={3} maxLength={500} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} className="w-full rounded-lg border border-line bg-surface px-3 py-2" />
           </Field>
