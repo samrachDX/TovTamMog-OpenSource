@@ -32,6 +32,8 @@ beforeAll(async () => {
     [f.orgId, f.employeeId, rec.id],
   );
   await db.query(`insert into request_events (request_id, action) values ($1, 'submitted')`, [req.id]);
+  await db.query(`insert into notifications (org_id, employee_id, kind, title_km, title_en) values ($1, $2, 'test', 'ក', 'A')`, [f.orgId, f.employeeId]);
+  await db.query(`insert into telegram_outbox (employee_id, chat_id, text) values ($1, 1, 'hi')`, [f.employeeId]);
   await db.query(
     `insert into employee_requests (org_id, employee_id, type, reason, start_date) values ($1, $2, 'leave', 'ធុរៈផ្ទាល់ខ្លួន', '2026-10-20')`,
     [f.orgId, f.employeeId],
@@ -43,14 +45,16 @@ describe('reset attendance', () => {
   it('a preview counts and changes nothing', async () => {
     const c = await resetAttendance(db, { apply: false });
     expect(c).toMatchObject({ records: 1, requests: 2, requestEvents: 1, attachments: 0 });
+    expect(c.notifications).toBeGreaterThanOrEqual(1);
+    expect(c.telegramQueue).toBeGreaterThanOrEqual(1);
     expect(c.events).toBeGreaterThanOrEqual(2);
     expect(c.attempts).toBeGreaterThanOrEqual(3);
     expect(await count('attendance_records')).toBe(1);
   });
 
-  it('clears attendance and all requests, keeps everything else, and restores the guards', async () => {
+  it('clears attendance, all requests and the inbox, keeps everything else, and restores the guards', async () => {
     await resetAttendance(db, { apply: true });
-    for (const table of ['attendance_records', 'attendance_events', 'attendance_attempts', 'attendance_adjustments', 'request_events']) {
+    for (const table of ['attendance_records', 'attendance_events', 'attendance_attempts', 'attendance_adjustments', 'request_events', 'notifications', 'telegram_outbox']) {
       expect(await count(table)).toBe(0);
     }
     expect(await count('employee_requests')).toBe(0);

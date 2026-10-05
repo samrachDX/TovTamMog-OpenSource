@@ -1,5 +1,5 @@
 /**
- * Clears all attendance records and employee requests for a fresh start (see src/lib/maintenance/reset-attendance.ts
+ * Clears all attendance records, employee requests and Inbox notifications for a fresh start (see src/lib/maintenance/reset-attendance.ts
  * for exactly what goes and what stays). Without --yes it only shows what would be removed.
  *
  * Usage:
@@ -42,7 +42,9 @@ async function main() {
   clock-in attempts         ${c.attempts}
   record adjustments        ${c.adjustments}
   requests (all types)      ${c.requests} (with ${c.requestEvents} history entries, ${c.attachments} files)
-Kept: employees, branches, schedules, leave types, events, audit log.`);
+  inbox notifications       ${c.notifications}
+  queued Telegram messages  ${c.telegramQueue}
+Kept: employees, branches, schedules, leave types, events and announcements, audit log.`);
     if (!apply) console.log('\nNothing was changed. Run again with --yes to delete.');
   } finally {
     await client.end();
