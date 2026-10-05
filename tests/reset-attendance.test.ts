@@ -42,19 +42,19 @@ afterAll(() => close());
 describe('reset attendance', () => {
   it('a preview counts and changes nothing', async () => {
     const c = await resetAttendance(db, { apply: false });
-    expect(c).toMatchObject({ records: 1, requests: 1, requestEvents: 1 });
+    expect(c).toMatchObject({ records: 1, requests: 2, requestEvents: 1, attachments: 0 });
     expect(c.events).toBeGreaterThanOrEqual(2);
     expect(c.attempts).toBeGreaterThanOrEqual(3);
     expect(await count('attendance_records')).toBe(1);
   });
 
-  it('clears attendance and linked requests, keeps everything else, and restores the guards', async () => {
+  it('clears attendance and all requests, keeps everything else, and restores the guards', async () => {
     await resetAttendance(db, { apply: true });
     for (const table of ['attendance_records', 'attendance_events', 'attendance_attempts', 'attendance_adjustments', 'request_events']) {
       expect(await count(table)).toBe(0);
     }
-    expect(await count('employee_requests', `type = 'late'`)).toBe(0);
-    expect(await count('employee_requests', `type = 'leave'`)).toBe(1);
+    expect(await count('employee_requests')).toBe(0);
+    expect(await count('leave_types')).toBe(2);
     expect(await count('employees')).toBeGreaterThan(0);
     expect(await count('shift_assignments')).toBe(1);
 
