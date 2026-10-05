@@ -127,11 +127,15 @@ export async function generateWeeklyShifts(
   return created;
 }
 
-/** Removes upcoming generated shifts that nobody has clocked against. Days off (cancelled) are kept as markers. */
+/**
+ * Removes generated shifts that are not over yet and that nobody has clocked against,
+ * including one already under way today with no clock-in, so a change made mid-day applies
+ * to today too. Days off (cancelled) are kept as markers.
+ */
 async function clearFuture(db: Db, scheduleId: string, now: Date, weekdays?: number[]): Promise<number> {
   const rows = await db.query(
     `delete from shift_assignments sa
-     where sa.pattern_id = $1 and sa.status = 'published' and sa.start_at > $2
+     where sa.pattern_id = $1 and sa.status = 'published' and sa.end_at > $2
        and ($3::int[] is null or extract(isodow from sa.work_date)::int = any($3::int[]))
        and not exists (select 1 from attendance_records r where r.shift_assignment_id = sa.id)
      returning sa.id`,

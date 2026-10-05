@@ -238,4 +238,17 @@ describe('weekly schedule', () => {
     expect((await shifts(oneOff, '2026-10-07', '2026-10-07'))[0].s).toEqual(new Date('2026-10-07T11:00:00Z'));
     expect((await listWeeklySchedules(db, manager, f.branchId)).find((x) => x.employeeCode === 'W6')).toMatchObject({ startTime: '17:00', endTime: '21:30' });
   });
+
+  it('a change made mid-shift replaces today\'s shift if nobody has clocked in', async () => {
+    const { id: part } = await saveTemplate(db, manager, { branchId: f.branchId, nameKm: 'ក្រៅម៉ោង', nameEn: 'Part-time', startTime: '13:00', endTime: '17:00' });
+    const w8 = await addEmployee(db, f.orgId, 'W8', [f.branchId]);
+    await setWeeklySchedule(db, manager, { branchId: f.branchId, employeeIds: [w8], templateId: morning, weekdays: [1, 2, 3, 4, 5, 6] });
+    // Monday 5 Oct, 12:00 in Phnom Penh: the 08:00 shift is under way but nobody clocked in.
+    const noon = new Date('2026-10-05T05:00:00Z');
+    const later = await loadActor(db, { employeeId: manager.employeeId, orgId: f.orgId }, { now: noon });
+    const [row] = await listEmployeeWeekly(db, later, w8);
+    await updateWeeklySchedule(db, later, row.id, { templateId: part, weekdays: [1, 2, 3, 4, 5, 6] });
+    const mon = (await shifts(w8, '2026-10-05', '2026-10-05')).filter((x) => x.status === 'published');
+    expect(mon.map((x) => x.s)).toEqual([new Date('2026-10-05T06:00:00Z')]); // 13:00
+  });
 });
