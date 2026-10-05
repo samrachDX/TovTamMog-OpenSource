@@ -12,7 +12,10 @@ import { DATE, TIME, date, oneOf, optText, optUuid, paging, requireCan, scopeOf,
 
 type Input = Record<string, unknown>;
 
-export const REQUEST_TYPES = ['leave', 'absence', 'late', 'missed_clock_out', 'correction', 'overtime'] as const;
+export const REQUEST_TYPES = ['leave', 'absence', 'late', 'missed_clock_out', 'correction', 'overtime', 'missed_clock_in'] as const;
+/** Types whose approval changes or creates an attendance record; they also need attendance.approve. */
+const CHANGES_RECORD: readonly string[] = ['missed_clock_out', 'correction', 'missed_clock_in'];
+const MISSED_CLOCK_IN_WINDOW_DAYS = 31;
 export type RequestType = (typeof REQUEST_TYPES)[number];
 export type RequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
@@ -106,6 +109,37 @@ function checkTimes(rec: RecordRow, clockIn: Date | null, clockOut: Date | null,
   }
 }
 
+/** Where a forgotten day belongs: its published shift if there is one, else the primary branch. */
+async function missedDayTarget(db: Db, employeeId: string, workDate: string) {
+  const rows = await db.query<{
+    shift_id: string | null; branch_id: string; timezone: string; late_grace_minutes: number; early_leave_grace_minutes: number;
+    shift_start: Date | null; shift_end: Date | null; org_id: string;
+  }>(
+    `select sa.id as shift_id, b.id as branch_id, b.timezone, b.late_grace_minutes, b.early_leave_grace_minutes,
+            sa.start_at as shift_start, sa.end_at as shift_end, b.org_id
+     from employees e
+     left join lateral (select * from shift_assignments s where s.employee_id = e.id and s.work_date = $2::date and s.status = 'published'
+                        order by s.start_at limit 1) sa on true
+     join branches b on b.id = coalesce(sa.branch_id,
+       (select eb.branch_id from employee_branches eb where eb.employee_id = e.id order by eb.is_primary desc limit 1))
+     where e.id = $1`,
+    [employeeId, workDate],
+  );
+  if (!rows[0]) throw new AppError('NOT_FOUND');
+  return rows[0];
+}
+
+/** The record already kept for that shift or day, if any. */
+async function existingDayRecord(db: Db, employeeId: string, workDate: string, shiftId: string | null) {
+  const rows = await db.query<{ id: string; status: string }>(
+    `select id, status from attendance_records
+     where employee_id = $1 and (shift_assignment_id = $3 or ($3::uuid is null and work_date = $2::date))
+     order by clock_in_at nulls first limit 1`,
+    [employeeId, workDate, shiftId],
+  );
+  return rows[0];
+}
+
 // ---- employee side -----------------------------------------------------------
 
 export async function createRequest(
@@ -185,6 +219,22 @@ export async function createRequest(
       if (open.some((o) => { const x = overtimeSpan(o.start_time, o.end_time); return x.from < span.to && span.from < x.to; })) {
         throw new AppError('REQUEST_ALREADY_OPEN');
       }
+    } else if (type === 'missed_clock_in') {
+      // Forgot to scan: the day's record is created from these times once a manager approves.
+      startDate = date(input, 'startDate');
+      endDate = startDate;
+      const age = (Date.parse(`${now.toISOString().slice(0, 10)}T00:00:00Z`) - Date.parse(`${startDate}T00:00:00Z`)) / 86_400_000;
+      if (age < -1 || age > MISSED_CLOCK_IN_WINDOW_DAYS) throw new AppError('DATE_RANGE_INVALID');
+      const target = await missedDayTarget(tx, who.employeeId, startDate);
+      recordBranchId = target.branch_id;
+      const existing = await existingDayRecord(tx, who.employeeId, startDate, target.shift_id);
+      if (existing && existing.status !== 'absent') throw new AppError('RECORD_EXISTS');
+      proposedIn = await toInstant(tx, localTime(input, 'proposedClockIn'), target.timezone);
+      proposedOut = await toInstant(tx, localTime(input, 'proposedClockOut'), target.timezone);
+      if (!proposedIn) throw new AppError('VALIDATION', { field: 'proposedClockIn' });
+      // A day already marked absent is replaced as a whole, so it needs both times.
+      if (existing && !proposedOut) throw new AppError('VALIDATION', { field: 'proposedClockOut' });
+      checkTimes({ work_date: startDate } as RecordRow, proposedIn, proposedOut, now);
     } else {
       recordId = uuid(input, 'attendanceRecordId');
       const rec = await lockRecord(tx, recordId);
@@ -194,16 +244,17 @@ export async function createRequest(
 
       if (type === 'late') {
         if (rec.late_minutes <= 0) throw new AppError('RECORD_NOT_CORRECTABLE');
-      } else if (rec.status === 'clocked_in') {
-        // Still on shift: only the clock-in can be corrected; the clock-out is made by clocking out.
-        // The record stays open so clocking out keeps working while the request waits.
-        if (type !== 'correction' || input.proposedClockOut) throw new AppError('RECORD_NOT_CORRECTABLE');
+      } else if (rec.status === 'clocked_in' && !input.proposedClockOut) {
+        // Still on shift and only the clock-in is wrong: the record stays open, so clocking
+        // out keeps working while the request waits.
+        if (type !== 'correction') throw new AppError('RECORD_NOT_CORRECTABLE');
         proposedIn = await toInstant(tx, localTime(input, 'proposedClockIn'), rec.timezone);
         if (!proposedIn) throw new AppError('VALIDATION', { field: 'proposedClockIn' });
         if (rec.clock_in_at && proposedIn.getTime() === rec.clock_in_at.getTime()) throw new AppError('INVALID_CORRECTION');
         checkTimes(rec, proposedIn, null, now);
       } else {
-        if (rec.status === 'pending_correction') throw new AppError('RECORD_NOT_CORRECTABLE');
+        // A record still clocked in gets here only with a clock-out: they left without scanning.
+        if (rec.status === 'pending_correction' || (rec.status === 'clocked_in' && type !== 'correction')) throw new AppError('RECORD_NOT_CORRECTABLE');
         if (type === 'missed_clock_out' && rec.status !== 'missed_clock_out') throw new AppError('RECORD_NOT_CORRECTABLE');
         proposedIn = type === 'correction' ? await toInstant(tx, localTime(input, 'proposedClockIn'), rec.timezone) : null;
         proposedOut = await toInstant(tx, localTime(input, 'proposedClockOut'), rec.timezone);
@@ -247,7 +298,7 @@ export async function createRequest(
     // Alert everyone who can decide this request, plus anyone the branch added, never the requester.
     // A correction is decided at the record's branch and needs attendance.approve as well.
     const branches = (await tx.query<{ branch_id: string }>(`select branch_id from employee_branches where employee_id = $1`, [who.employeeId])).map((b) => b.branch_id);
-    const changesRecord = type === 'missed_clock_out' || type === 'correction';
+    const changesRecord = CHANGES_RECORD.includes(type);
     const scope = changesRecord && recordBranchId ? [recordBranchId] : branches;
     const canDecide = await approvers(tx, who.orgId, scope, changesRecord ? ['request.review', 'attendance.approve'] : ['request.review'], [who.employeeId]);
     const extra = await branchRecipients(tx, branches, [who.employeeId]);
@@ -279,7 +330,7 @@ const REQUEST_SELECT = `
          coalesce((select json_agg(json_build_object('id', a.id, 'name', a.file_name, 'contentType', a.content_type,
                                                      'size', octet_length(a.bytes)) order by a.created_at)
                    from request_attachments a where a.request_id = q.id), '[]'::json) as attachments,
-         case when q.type = 'overtime' then (
+         case when q.type in ('overtime', 'missed_clock_in') then (
            select json_build_object('startAt', sa.start_at, 'endAt', sa.end_at) from shift_assignments sa
            where sa.employee_id = q.employee_id and sa.work_date = q.start_date and sa.status = 'published'
            order by sa.start_at limit 1) end as "otShift",
@@ -302,7 +353,11 @@ export async function listMyRequests(db: Db, employeeId: string, filter: Input =
 async function restoreRecord(db: Db, req: { attendance_record_id: string | null; previous_record_status: string | null }, now: Date) {
   if (req.attendance_record_id && req.previous_record_status) {
     await db.query(
-      `update attendance_records set status = $2, updated_at = $3 where id = $1 and status = 'pending_correction'`,
+      // A record that was open goes back to open, unless another one has been opened since.
+      `update attendance_records r set updated_at = $3, status = case
+         when $2 = 'clocked_in' and exists (select 1 from attendance_records o where o.employee_id = r.employee_id
+           and o.status = 'clocked_in' and o.id <> r.id) then 'missed_clock_out' else $2 end
+       where r.id = $1 and r.status = 'pending_correction'`,
       [req.attendance_record_id, req.previous_record_status, now],
     );
   }
@@ -351,6 +406,52 @@ export async function listMyAttendance(db: Db, employeeId: string, filter: Input
 }
 
 // ---- adjustments ---------------------------------------------------------------
+
+/**
+ * Creates the record for a day the employee forgot to scan, from approved times. A day the
+ * system had already marked absent is corrected instead, keeping the original in the trail.
+ */
+async function createMissedDay(
+  db: Db,
+  req: { employee_id: string; start_date: string; proposed_clock_in_at: Date; proposed_clock_out_at: Date | null },
+  target: Awaited<ReturnType<typeof missedDayTarget>>,
+  meta: { requestId: string; proposedBy: string; approvedBy: string; reason: string; now: Date },
+): Promise<void> {
+  const clockIn = req.proposed_clock_in_at;
+  const clockOut = req.proposed_clock_out_at;
+  const existing = await existingDayRecord(db, req.employee_id, req.start_date, target.shift_id);
+  if (existing && existing.status !== 'absent') throw new AppError('RECORD_EXISTS');
+  if (existing) {
+    const rec = await lockRecord(db, existing.id);
+    await applyAdjustment(db, rec!, { clockIn, clockOut }, meta);
+    return;
+  }
+  checkTimes({ work_date: req.start_date } as RecordRow, clockIn, clockOut, meta.now);
+  if (!clockOut) {
+    const open = await db.query(`select 1 from attendance_records where employee_id = $1 and status = 'clocked_in'`, [req.employee_id]);
+    if (open.length) throw new AppError('RECORD_EXISTS');
+  }
+  const expected = target.shift_start && target.shift_end
+    ? await expectedHours(db, { employeeId: req.employee_id, workDate: req.start_date, shiftStart: target.shift_start, shiftEnd: target.shift_end, timezone: target.timezone })
+    : null;
+  const late = expected ? lateMinutes(clockIn, expected.start, target.late_grace_minutes) : 0;
+  const early = expected && clockOut ? earlyLeaveMinutes(clockOut, expected.end, target.early_leave_grace_minutes) : 0;
+  const worked = clockOut ? Math.floor((clockOut.getTime() - clockIn.getTime()) / MINUTE) : null;
+  const status = clockOut ? 'completed' : 'clocked_in';
+  const [row] = await db.query<{ id: string }>(
+    `insert into attendance_records (org_id, employee_id, branch_id, shift_assignment_id, work_date, clock_in_at, clock_out_at,
+       status, late_minutes, early_leave_minutes, worked_minutes, created_at, updated_at)
+     values ($1, $2, $3, $4, $5::date, $6, $7, $8, $9, $10, $11, $12, $12) returning id`,
+    [target.org_id, req.employee_id, target.branch_id, target.shift_id, req.start_date, clockIn, clockOut, status, late, early, worked, meta.now],
+  );
+  await db.query(
+    `insert into attendance_adjustments (org_id, record_id, request_id, proposed_by, approved_by, reason, original, updated, created_at)
+     values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9)`,
+    [target.org_id, row.id, meta.requestId, meta.proposedBy, meta.approvedBy, meta.reason, JSON.stringify({ status: null }),
+      JSON.stringify({ status, clockInAt: clockIn, clockOutAt: clockOut, lateMinutes: late, earlyLeaveMinutes: early, workedMinutes: worked }), meta.now],
+  );
+}
+
 
 /**
  * Moves the clock-in of a record that is still open. Lateness is worked out again from the
@@ -580,6 +681,15 @@ export async function decideRequest(db: Db, actor: Actor, id: string, input: Inp
     if (req.employee_id === actor.employeeId) throw new AppError('CANNOT_REVIEW_OWN');
     if (req.status !== 'pending') throw new AppError('REQUEST_NOT_PENDING');
 
+    if (req.type === 'missed_clock_in') {
+      const target = await missedDayTarget(tx, req.employee_id, req.start_date!);
+      requireCan(actor, 'attendance.approve', target.branch_id);
+      if (decision === 'approved') {
+        await createMissedDay(tx, req as typeof req & { start_date: string; proposed_clock_in_at: Date }, target, {
+          requestId: id, proposedBy: req.employee_id, approvedBy: actor.employeeId, reason: req.reason, now,
+        });
+      }
+    }
     const changesRecord = req.type === 'missed_clock_out' || req.type === 'correction';
     if (changesRecord) {
       const rec = await lockRecord(tx, req.attendance_record_id!);

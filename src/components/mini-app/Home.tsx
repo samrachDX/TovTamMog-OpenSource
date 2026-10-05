@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { localHour, type MessageKey } from '@/lib/i18n';
 import { useI18n } from './i18n-context';
 import { Avatar } from '@/components/Avatar';
@@ -51,8 +52,9 @@ const STATE_TONE: Record<Me['overview']['state'], string> = {
 };
 
 export function Home({ me, onClock, onRequest }: {
-  me: Me; onClock(action: 'clock_in' | 'clock_out', forgot?: boolean): void; onRequest(kind: RequestKind, record: RecordRef): void;
+  me: Me; onClock(action: 'clock_in' | 'clock_out'): void; onRequest(kind: RequestKind, record?: RecordRef): void;
 }) {
+  const [choosing, setChoosing] = useState(false);
   const { t, locale, timeZone, time, longDate } = useI18n();
   const { profile, overview } = me;
   const km = locale === 'km-KH';
@@ -137,17 +139,34 @@ export function Home({ me, onClock, onRequest }: {
 
       {overview.nextAction ? (
         <div className="mt-auto flex flex-col gap-2">
-          <Button className="min-h-16 text-lg" onClick={() => onClock(overview.nextAction!)}>
-            {t(overview.nextAction === 'clock_in' ? 'attendance.clockIn' : 'attendance.clockOut')}
-          </Button>
-          <p className="text-center text-sm text-muted">{t('attendance.scanHint')}</p>
-          <button
-            type="button"
-            className="pressable min-h-11 text-sm font-semibold text-primary-strong underline"
-            onClick={() => onClock(overview.nextAction!, true)}
-          >
-            {t(overview.nextAction === 'clock_in' ? 'attendance.forgot.in' : 'attendance.forgot.out')}
-          </button>
+          {choosing ? (
+            // Scanning is the normal way; someone who forgot and is no longer at the branch sends the real time instead.
+            <section aria-label={t(overview.nextAction === 'clock_in' ? 'attendance.clockIn' : 'attendance.clockOut')} className="flex flex-col gap-2 rounded-2xl border border-line p-3">
+              <Button className="min-h-14" onClick={() => { setChoosing(false); onClock(overview.nextAction!); }}>
+                {t('attendance.choose.scan')}
+              </Button>
+              <Button
+                variant="secondary"
+                className="min-h-14"
+                onClick={() => {
+                  setChoosing(false);
+                  if (overview.nextAction === 'clock_in') onRequest('missed_clock_in');
+                  else if (record) onRequest('correction', record);
+                }}
+              >
+                {t(overview.nextAction === 'clock_in' ? 'attendance.choose.forgotIn' : 'attendance.choose.forgotOut')}
+              </Button>
+              <p className="px-1 text-sm text-muted">{t('attendance.choose.note')}</p>
+              <button type="button" className="pressable min-h-11 text-sm text-muted" onClick={() => setChoosing(false)}>{t('common.back')}</button>
+            </section>
+          ) : (
+            <>
+              <Button className="min-h-16 text-lg" onClick={() => setChoosing(true)}>
+                {t(overview.nextAction === 'clock_in' ? 'attendance.clockIn' : 'attendance.clockOut')}
+              </Button>
+              <p className="text-center text-sm text-muted">{t('attendance.scanHint')}</p>
+            </>
+          )}
         </div>
       ) : null}
     </>

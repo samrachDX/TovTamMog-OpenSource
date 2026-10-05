@@ -76,7 +76,7 @@ function getPosition(): Promise<Position> {
  * has accepted the request. One idempotency key covers the whole attempt, so a retry
  * after a dropped connection cannot create a second record.
  */
-export function ClockFlow({ action, forgot = false, onDone }: { action: Action; forgot?: boolean; onDone(changed: boolean): void }) {
+export function ClockFlow({ action, onDone }: { action: Action; onDone(changed: boolean): void }) {
   const { t, locale, time, errorText } = useI18n();
   const [step, setStep] = useState<Step>({ name: 'scanning' });
   const started = useRef(false);
@@ -178,7 +178,7 @@ export function ClockFlow({ action, forgot = false, onDone }: { action: Action; 
           <p className="text-4xl font-semibold tabular-nums">{time(step.at)}</p>
           <p className="text-muted">{t('attendance.confirmBranch', { branch: name(step.branch) })}</p>
         </div>
-        <ForgotTime action={action} record={step.record} at={step.at} openAtStart={forgot} />
+        <ForgotTime action={action} record={step.record} at={step.at} />
         <Button onClick={() => onDone(true)}>{t('common.close')}</Button>
       </Screen>
     );
@@ -259,9 +259,9 @@ function nextDay(day: string): string {
  * For someone who forgot to scan on time: the scan just made stays as recorded, and the
  * time they really arrived or left goes to their manager as a correction request.
  */
-function ForgotTime({ action, record, at, openAtStart }: { action: Action; record: ClockedRecord; at: string; openAtStart: boolean }) {
+function ForgotTime({ action, record, at }: { action: Action; record: ClockedRecord; at: string }) {
   const { t, locale, timeZone, errorText } = useI18n();
-  const [open, setOpen] = useState(openAtStart);
+  const [open, setOpen] = useState(false);
   const [actual, setActual] = useState('');
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);

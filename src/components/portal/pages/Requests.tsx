@@ -10,7 +10,7 @@ import {
   Badge, Card, DataTable, Dialog, Field, LoadState, Notice, PageHeader, Pager, Select, SmallButton, useLoad, type Column,
 } from '../ui';
 
-type Kind = 'leave' | 'absence' | 'late' | 'missed_clock_out' | 'correction' | 'overtime';
+type Kind = 'leave' | 'absence' | 'late' | 'missed_clock_in' | 'missed_clock_out' | 'correction' | 'overtime';
 type Item = {
   id: string; type: Kind; status: 'pending' | 'approved' | 'rejected' | 'cancelled'; reason: string;
   startDate: string | null; endDate: string | null; workDate: string | null;
@@ -23,7 +23,7 @@ type Item = {
   otShift: { startAt: string; endAt: string } | null; otRecord: { clockInAt: string | null; clockOutAt: string | null } | null;
 };
 
-const KINDS: Kind[] = ['leave', 'absence', 'late', 'missed_clock_out', 'correction', 'overtime'];
+const KINDS: Kind[] = ['leave', 'absence', 'late', 'missed_clock_in', 'missed_clock_out', 'correction', 'overtime'];
 const TONE = { pending: 'warn', approved: 'ok', rejected: 'bad', cancelled: 'muted' } as const;
 const LIMIT = 50;
 
@@ -99,7 +99,7 @@ export function Requests() {
     }
   };
 
-  const changesRecord = open && (open.type === 'missed_clock_out' || open.type === 'correction');
+  const changesRecord = open && (open.type === 'missed_clock_out' || open.type === 'correction' || open.type === 'missed_clock_in');
   // Approving a correction rewrites the record, which needs attendance.approve at that branch.
   const mayDecide = open && open.status === 'pending' && open.employeeId !== me.employeeId
     && (!changesRecord || can('attendance.approve', open.branchId));
@@ -177,6 +177,11 @@ export function Requests() {
                 <Row label={t('home.clockInTime')} value={open.otRecord?.clockInAt ? time(open.otRecord.clockInAt) : '—'} />
                 <Row label={t('home.clockOutTime')} value={open.otRecord?.clockOutAt ? time(open.otRecord.clockOutAt) : '—'} />
               </dl>
+            ) : null}
+            {open.type === 'missed_clock_in' ? (
+              <p className="text-sm text-muted">
+                {t('reports.col.shift')}: {open.otShift ? `${time(open.otShift.startAt)}–${time(open.otShift.endAt)}` : t('reports.noShift')} · {t('requests.noScan')}
+              </p>
             ) : null}
             {open.type === 'late' && open.clockInAt ? <p className="text-sm text-muted">{t('home.clockInTime')}: {time(open.clockInAt)}</p> : null}
             <div className="rounded-lg bg-pale p-3 text-sm">

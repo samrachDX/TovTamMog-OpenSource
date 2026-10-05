@@ -8,7 +8,7 @@ import { useI18n } from './i18n-context';
 import { Button, Header, Notice } from './ui';
 
 export type RecordRef = { id: string; workDate: string; clockInAt: string | null; clockOutAt: string | null };
-export type RequestKind = 'leave' | 'absence' | 'late' | 'missed_clock_out' | 'correction' | 'overtime';
+export type RequestKind = 'leave' | 'absence' | 'late' | 'missed_clock_out' | 'correction' | 'overtime' | 'missed_clock_in';
 
 const INPUT = 'min-h-12 w-full rounded-xl border border-line bg-surface px-3';
 
@@ -122,9 +122,10 @@ export function RequestForm({ kind, record, onDone }: { kind: RequestKind; recor
   };
 
   const needsOut = kind === 'missed_clock_out';
-  // Still clocked in: only the clock-in can be fixed now; clocking out works as usual.
+  // Still clocked in: the clock-out is the time they left without scanning; the clock-in only if it was wrong too.
   const openShift = kind === 'correction' && !!record && !record.clockOutAt;
-  const timesOk = kind === 'correction' ? !!(clockIn || (clockOut && !openShift)) : needsOut ? !!clockOut : true;
+  const missedIn = kind === 'missed_clock_in';
+  const timesOk = missedIn ? !!clockIn : kind === 'correction' ? !!(clockIn || clockOut) : needsOut ? !!clockOut : true;
   const leaveOk = kind !== 'leave' || (unit === 'day' ? endDate >= startDate : unit === 'hours' ? toTime > fromTime : true);
   const typeOk = kind !== 'leave' || (!!typeId && (!needsFile || files.length > 0));
   const otMinutes = overtimeMinutes(otFrom, otTo);
@@ -144,10 +145,14 @@ export function RequestForm({ kind, record, onDone }: { kind: RequestKind; recor
       }
       if (kind === 'absence') Object.assign(body, { startDate });
       if (kind === 'overtime') Object.assign(body, { startDate, startTime: otFrom, endTime: otTo });
+      if (missedIn) {
+        Object.assign(body, { startDate, proposedClockIn: { date: startDate, time: clockIn } });
+        if (clockOut) body.proposedClockOut = { date: outNextDay ? nextDay(startDate) : startDate, time: clockOut };
+      }
       if (record) {
         body.attendanceRecordId = record.id;
         if (kind === 'correction' && clockIn) body.proposedClockIn = { date: record.workDate, time: clockIn };
-        if ((kind === 'correction' || needsOut) && clockOut && !openShift) {
+        if ((kind === 'correction' || needsOut) && clockOut) {
           body.proposedClockOut = { date: outNextDay ? nextDay(record.workDate) : record.workDate, time: clockOut };
         }
       }
@@ -282,9 +287,19 @@ export function RequestForm({ kind, record, onDone }: { kind: RequestKind; recor
         </label>
       ) : null}
       {openShift ? <p className="rounded-xl bg-pale px-3 py-2 text-sm">{t('requests.openShiftNote')}</p> : null}
-      {(kind === 'correction' && !openShift) || needsOut ? (
+      {missedIn ? (
         <>
-          <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('requests.correctOut')}</span>
+          <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('portal.date')}</span>
+            <input type="date" required className={INPUT} value={startDate} max={today} onChange={(e) => setStartDate(e.target.value)} />
+          </label>
+          <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('attendance.forgot.actualIn')}</span>
+            <input type="time" required className={INPUT} value={clockIn} onChange={(e) => setClockIn(e.target.value)} />
+          </label>
+        </>
+      ) : null}
+      {kind === 'correction' || needsOut || missedIn ? (
+        <>
+          <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t(missedIn ? 'requests.outOptional' : openShift ? 'attendance.forgot.actualOut' : 'requests.correctOut')}</span>
             <input type="time" required={needsOut} className={INPUT} value={clockOut} onChange={(e) => setClockOut(e.target.value)} />
           </label>
           <label className="flex min-h-11 items-center gap-3 text-sm">

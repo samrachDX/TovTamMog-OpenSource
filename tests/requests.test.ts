@@ -8,6 +8,7 @@ import {
 } from '@/lib/requests';
 import { clock } from '@/lib/attendance/engine';
 import { runAttendanceMaintenance } from '@/lib/attendance/maintenance';
+import { getTodayOverview } from '@/lib/attendance/overview';
 import { addEmployee, addShift, BRANCH_IP, BRANCH_LAT, BRANCH_LON, createTestDb, seed, type Fixture } from './helpers/db';
 
 let db: Db;
@@ -138,7 +139,7 @@ describe('rejection and cancellation restore the record', () => {
     const id = cin.ok ? cin.record.id : '';
     expect((await record(id)).late_minutes).toBe(25);
     const base = { type: 'correction', attendanceRecordId: id, reason: 'មកដល់ម៉ោង ៨ តែស្កេនយឺត' };
-    await expect(createRequest(db, me(day(9, 2)), { ...base, proposedClockOut: { date: '2026-10-09', time: '16:00' } })).rejects.toThrow('RECORD_NOT_CORRECTABLE');
+    await expect(createRequest(db, me(day(9, 2)), { ...base, proposedClockOut: { date: '2026-10-09', time: '16:00' } })).rejects.toThrow('INVALID_CORRECTION'); // not yet 16:00
     await expect(createRequest(db, me(day(9, 2)), { ...base, proposedClockIn: { date: '2026-10-09', time: '10:00' } })).rejects.toThrow('INVALID_CORRECTION'); // in the future
     await expect(createRequest(db, me(day(9, 2)), { ...base, proposedClockIn: { date: '2026-10-09', time: '08:25' } })).rejects.toThrow('INVALID_CORRECTION'); // unchanged
     await expect(createRequest(db, me(day(9, 2)), { type: 'missed_clock_out', attendanceRecordId: id, reason: 'x x x', proposedClockOut: { date: '2026-10-09', time: '16:00' } })).rejects.toThrow('RECORD_NOT_CORRECTABLE');
@@ -179,6 +180,87 @@ describe('rejection and cancellation restore the record', () => {
     await decideRequest(db, manager, requestId, { decision: 'rejected', note: 'camera shows 08:30' });
     expect(await record(id)).toMatchObject({ status: 'clocked_in', late_minutes: 30 });
     await tap(f.employeeId, 'clock_out', day(11, 9));
+  });
+});
+
+describe('forgot to scan, sent without a QR code', () => {
+  let who: string;
+  const as = (now: Date) => ({ employeeId: who, orgId: f.orgId, now });
+  const byDay = async (d: string) =>
+    (await db.query<{ id: string; status: string; clock_in_at: Date; clock_out_at: Date | null; late_minutes: number; worked_minutes: number | null; shift_assignment_id: string | null }>(
+      `select id, status, clock_in_at, clock_out_at, late_minutes, worked_minutes, shift_assignment_id from attendance_records where employee_id = $1 and work_date = $2`, [who, d],
+    ))[0];
+  beforeAll(async () => { who = await addEmployee(db, f.orgId, 'FGT', [f.branchId]); });
+
+  it('a clock-out sent from home closes the open record once approved', async () => {
+    await addShift(db, { employeeId: who, branchId: f.branchId }, day(12), day(12, 9));
+    const cin = await tap(who, 'clock_in', day(12));
+    const id = cin.ok ? cin.record.id : '';
+    const { id: requestId } = await createRequest(db, as(day(12, 12)), {
+      type: 'correction', attendanceRecordId: id, reason: 'ភ្លេចស្កេនចេញ ទៅផ្ទះហើយ', proposedClockOut: { date: '2026-10-12', time: '16:00' },
+    });
+    expect((await record(id)).status).toBe('pending_correction');
+    await decideRequest(db, manager, requestId, { decision: 'approved' });
+    expect(await record(id)).toMatchObject({ status: 'completed', clock_out_at: day(12, 9), worked_minutes: 480 });
+  });
+
+  it('a rejected clock-out puts the record back to clocked in', async () => {
+    await addShift(db, { employeeId: who, branchId: f.branchId }, day(13), day(13, 9));
+    const cin = await tap(who, 'clock_in', day(13));
+    const id = cin.ok ? cin.record.id : '';
+    const { id: requestId } = await createRequest(db, as(day(13, 10)), {
+      type: 'correction', attendanceRecordId: id, reason: 'left at four', proposedClockOut: { date: '2026-10-13', time: '16:00' },
+    });
+    await decideRequest(db, manager, requestId, { decision: 'rejected', note: 'not confirmed' });
+    expect((await record(id)).status).toBe('clocked_in');
+    await tap(who, 'clock_out', day(13, 9));
+  });
+
+  it('a forgotten clock-in creates the day once approved', async () => {
+    const shiftId = await addShift(db, { employeeId: who, branchId: f.branchId }, day(14), day(14, 9));
+    const base = { type: 'missed_clock_in', startDate: '2026-10-14', reason: 'ភ្លេចស្កេនទាំងចូល ទាំងចេញ' };
+    await expect(createRequest(db, as(day(14, 10)), { ...base, proposedClockOut: { date: '2026-10-14', time: '16:00' } })).rejects.toThrow('VALIDATION');
+    await expect(createRequest(db, as(day(14, 2)), { ...base, proposedClockIn: { date: '2026-10-14', time: '08:10' }, proposedClockOut: { date: '2026-10-14', time: '16:00' } })).rejects.toThrow('INVALID_CORRECTION'); // in the future
+    await expect(createRequest(db, as(day(14, 10)), { ...base, startDate: '2026-08-01', proposedClockIn: { date: '2026-08-01', time: '08:00' } })).rejects.toThrow('DATE_RANGE_INVALID');
+    const { id: requestId } = await createRequest(db, as(day(14, 10)), {
+      ...base, proposedClockIn: { date: '2026-10-14', time: '08:10' }, proposedClockOut: { date: '2026-10-14', time: '16:00' },
+    });
+    await expect(createRequest(db, as(day(14, 10)), { ...base, proposedClockIn: { date: '2026-10-14', time: '08:00' } })).rejects.toThrow('REQUEST_ALREADY_OPEN');
+    expect(await byDay('2026-10-14')).toBeUndefined(); // nothing recorded before approval
+    expect((await getTodayOverview(db, who, day(14, 10))).correctionPending).toBe(true);
+    await expect(decideRequest(db, supervisor, requestId, { decision: 'approved' })).rejects.toThrow('NOT_FOUND');
+    await decideRequest(db, manager, requestId, { decision: 'approved' });
+    expect(await byDay('2026-10-14')).toMatchObject({
+      status: 'completed', clock_in_at: day(14, 1, 10), clock_out_at: day(14, 9), late_minutes: 10, worked_minutes: 470, shift_assignment_id: shiftId,
+    });
+    const h = await getRecordHistory(db, manager, (await byDay('2026-10-14')).id) as unknown as { adjustments: { requestId: string }[] };
+    expect(h.adjustments[0].requestId).toBe(requestId);
+    await expect(createRequest(db, as(day(14, 11)), { ...base, proposedClockIn: { date: '2026-10-14', time: '08:00' } })).rejects.toThrow('RECORD_EXISTS');
+  });
+
+  it('with only a clock-in, the day stays open for a normal clock-out', async () => {
+    await addShift(db, { employeeId: who, branchId: f.branchId }, day(15), day(15, 9));
+    const { id: requestId } = await createRequest(db, as(day(15, 3)), {
+      type: 'missed_clock_in', startDate: '2026-10-15', reason: 'forgot at the door', proposedClockIn: { date: '2026-10-15', time: '08:00' },
+    });
+    await decideRequest(db, manager, requestId, { decision: 'approved' });
+    expect(await byDay('2026-10-15')).toMatchObject({ status: 'clocked_in', late_minutes: 0, clock_out_at: null });
+    const out = await tap(who, 'clock_out', day(15, 9));
+    expect(out.ok).toBe(true);
+    expect(await byDay('2026-10-15')).toMatchObject({ status: 'completed', worked_minutes: 480 });
+  });
+
+  it('a day already marked absent is corrected and needs both times', async () => {
+    await addShift(db, { employeeId: who, branchId: f.branchId }, day(16), day(16, 9));
+    await runAttendanceMaintenance(db, { now: day(16, 14) });
+    expect((await byDay('2026-10-16')).status).toBe('absent');
+    const base = { type: 'missed_clock_in', startDate: '2026-10-16', reason: 'was at work all day' };
+    await expect(createRequest(db, as(day(17)), { ...base, proposedClockIn: { date: '2026-10-16', time: '08:00' } })).rejects.toThrow('VALIDATION');
+    const { id: requestId } = await createRequest(db, as(day(17)), {
+      ...base, proposedClockIn: { date: '2026-10-16', time: '08:00' }, proposedClockOut: { date: '2026-10-16', time: '16:00' },
+    });
+    await decideRequest(db, manager, requestId, { decision: 'approved' });
+    expect(await byDay('2026-10-16')).toMatchObject({ status: 'completed', worked_minutes: 480, late_minutes: 0 });
   });
 });
 

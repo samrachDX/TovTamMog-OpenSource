@@ -54,7 +54,13 @@ export async function getTodayOverview(
   const forOtherShift = record && shift && record.status !== 'clocked_in' && record.shiftAssignmentId !== shift.id;
   if (!record || forOtherShift) {
     const canStart = shift ? shift.endAt.getTime() > now.getTime() : true;
-    return { state: 'not_clocked_in', record: null, shift, nextAction: canStart ? 'clock_in' : null, correctionPending: false };
+    // A forgotten clock-in sent without scanning waits as a request until it is approved.
+    const asked = await db.query<{ open: boolean }>(
+      `select exists (select 1 from employee_requests where employee_id = $1 and type = 'missed_clock_in'
+         and status = 'pending' and start_date = $2::date) as open`,
+      [employeeId, shift?.workDate ?? today],
+    );
+    return { state: 'not_clocked_in', record: null, shift, nextAction: canStart ? 'clock_in' : null, correctionPending: asked[0]?.open ?? false };
   }
   const pending = await db.query<{ open: boolean }>(
     `select exists (select 1 from employee_requests where attendance_record_id = $1 and status = 'pending'
