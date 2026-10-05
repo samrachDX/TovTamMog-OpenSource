@@ -76,8 +76,9 @@ export function Home({ me, onClock }: { me: Me; onClock(action: 'clock_in' | 'cl
       </header>
 
       <div className="relative rounded-2xl border border-line p-4 text-sm">
-        {/* Decorative animation in the corner; the wide rows leave room for it. */}
-        <LottieAnimation src={EMPLOYEE_CARD_ANIMATION} className="pointer-events-none absolute right-2 bottom-2 size-20" />
+        {/* Decorative animation in the corner; the wide rows leave room for it. Its frames have a
+            near-white (#FDFDFD) background, which multiply blends into the white card. */}
+        <LottieAnimation src={EMPLOYEE_CARD_ANIMATION} className="pointer-events-none absolute right-2 bottom-2 size-20 mix-blend-multiply" />
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2 [&>div.col-span-2]:pr-20">
           <Field label={t('home.employeeCode')} value={`${profile.employeeCode} · ${pick(profile.category.km, profile.category.en)}`} />
           <Field label={t('home.branch')} value={branch ? pick(branch.nameKm, branch.nameEn) : t('common.none')} />
