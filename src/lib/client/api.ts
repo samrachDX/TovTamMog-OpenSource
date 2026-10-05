@@ -49,7 +49,9 @@ export async function api<T>(
   opts: { method?: string; body?: unknown; locale: Locale; auth?: boolean },
 ): Promise<T> {
   const headers: Record<string, string> = { 'x-locale': opts.locale };
-  if (opts.body !== undefined) headers['content-type'] = 'application/json';
+  // FormData goes as multipart; the browser sets the content type and boundary itself.
+  const form = typeof FormData !== 'undefined' && opts.body instanceof FormData;
+  if (opts.body !== undefined && !form) headers['content-type'] = 'application/json';
   const token = opts.auth === false ? null : getToken();
   if (token) headers.authorization = `Bearer ${token}`;
 
@@ -58,7 +60,7 @@ export async function api<T>(
     res = await fetch(path, {
       method: opts.method ?? (opts.body === undefined ? 'GET' : 'POST'),
       headers,
-      body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+      body: opts.body === undefined ? undefined : form ? (opts.body as FormData) : JSON.stringify(opts.body),
       cache: 'no-store',
     });
   } catch {

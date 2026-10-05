@@ -71,6 +71,11 @@ export const ERROR_CODES = [
   'ROLE_IS_BUILT_IN',
   'ROLE_IN_USE',
   'PERMISSION_NOT_HELD',
+  // Leave types and attachments
+  'LEAVE_TYPE_IN_USE',
+  'LEAVE_TYPE_NAME_TAKEN',
+  'ATTACHMENT_REQUIRED',
+  'TOO_MANY_ATTACHMENTS',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

@@ -6,6 +6,7 @@ import { t, type MessageKey } from '@/lib/i18n';
 import { can } from '@/lib/auth/permissions';
 import { hitRateLimit } from '@/lib/auth/rate-limit';
 import { expectedHours, recomputeLateness } from '@/lib/attendance/leave';
+import { sniffContentType } from '@/lib/admin/files';
 import { earlyLeaveMinutes, lateMinutes } from '@/lib/attendance/timing';
 import { DATE, TIME, date, oneOf, optText, optUuid, paging, requireCan, scopeOf, text, time, uuid, type Actor } from '@/lib/admin/actor';
 
@@ -17,6 +18,28 @@ export type RequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
 const MINUTE = 60_000;
 const MAX_LEAVE_DAYS = 60;
+
+/**
+ * Supporting files sent with a request. The whole upload has to fit in one request to the
+ * server (Vercel accepts at most 4.5 MB), so the Mini App shrinks photos before sending.
+ */
+export const ATTACHMENT_LIMITS = { maxFiles: 3, maxTotalBytes: 4_000_000, types: ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'] };
+export type IncomingFile = { name: string; bytes: Uint8Array };
+
+function checkAttachments(files: IncomingFile[]): { name: string; contentType: string; bytes: Uint8Array }[] {
+  const total = files.reduce((n, f) => n + f.bytes.length, 0);
+  if (files.length > ATTACHMENT_LIMITS.maxFiles || total > ATTACHMENT_LIMITS.maxTotalBytes) {
+    throw new AppError('TOO_MANY_ATTACHMENTS', { max: ATTACHMENT_LIMITS.maxFiles, mb: (ATTACHMENT_LIMITS.maxTotalBytes / 1_000_000).toFixed(0) });
+  }
+  return files.map((f) => {
+    // The type comes from the file's first bytes, never from its name or what the browser claims.
+    const contentType = f.bytes.length ? sniffContentType(f.bytes) : null;
+    if (!contentType || !ATTACHMENT_LIMITS.types.includes(contentType)) throw new AppError('FILE_TYPE_NOT_ALLOWED');
+    // Keep a readable name, without paths or control characters.
+    const name = (f.name.split(/[\\/]/).pop() ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 120) || 'file';
+    return { name, contentType, bytes: f.bytes };
+  });
+}
 
 /** A wall-clock time at the branch, e.g. { date: '2026-10-05', time: '17:30' }. */
 type LocalTime = { date: string; time: string };
@@ -73,9 +96,15 @@ function checkTimes(rec: RecordRow, clockIn: Date | null, clockOut: Date | null,
 
 // ---- employee side -----------------------------------------------------------
 
-export async function createRequest(db: Db, who: { employeeId: string; orgId: string; now?: Date }, input: Input): Promise<{ id: string }> {
+export async function createRequest(
+  db: Db,
+  who: { employeeId: string; orgId: string; now?: Date },
+  input: Input,
+  files: IncomingFile[] = [],
+): Promise<{ id: string }> {
   const type = oneOf(input, 'type', REQUEST_TYPES);
   const why = text(input, 'reason', { min: 3, max: 1000 });
+  const attachments = checkAttachments(files);
   const now = who.now ?? new Date();
   // Every request messages the approvers, so one account cannot be used to flood them.
   for (const [window, limit] of [[3600, 10], [86_400, 30]] as const) {
@@ -95,6 +124,22 @@ export async function createRequest(db: Db, who: { employeeId: string; orgId: st
     let halfDayPart: 'morning' | 'afternoon' | null = null;
     let startTime: string | null = null;
     let endTime: string | null = null;
+    let leaveTypeId: string | null = null;
+
+    if (type === 'leave') {
+      // Older copies of the Mini App send no type; they get the first one in the list.
+      const requested = optUuid(input, 'leaveTypeId');
+      const types = await tx.query<{ id: string; requires_attachment: boolean }>(
+        `select id, requires_attachment from leave_types where org_id = $1 and active and ($2::uuid is null or id = $2::uuid)
+         order by sort_order, name_en limit 1`,
+        [who.orgId, requested],
+      );
+      if (requested && !types[0]) throw new AppError('VALIDATION', { field: 'leaveTypeId' });
+      if (types[0]) {
+        leaveTypeId = types[0].id;
+        if (types[0].requires_attachment && !attachments.length) throw new AppError('ATTACHMENT_REQUIRED');
+      }
+    }
 
     if (type === 'leave' || type === 'absence') {
       startDate = date(input, 'startDate');
@@ -138,15 +183,21 @@ export async function createRequest(db: Db, who: { employeeId: string; orgId: st
       const rows = await tx.query<{ id: string }>(
         `insert into employee_requests (org_id, employee_id, type, reason, start_date, end_date, attendance_record_id,
            proposed_clock_in_at, proposed_clock_out_at, previous_record_status, created_at, updated_at,
-           leave_unit, half_day_part, start_time, end_time)
-         values ($1, $2, $3, $4, $5::date, $6::date, $7, $8, $9, $10, $11, $11, $12, $13, $14::time, $15::time) returning id`,
+           leave_unit, half_day_part, start_time, end_time, leave_type_id)
+         values ($1, $2, $3, $4, $5::date, $6::date, $7, $8, $9, $10, $11, $11, $12, $13, $14::time, $15::time, $16) returning id`,
         [who.orgId, who.employeeId, type, why, startDate, endDate, recordId, proposedIn, proposedOut, previousStatus, now,
-          leaveUnit, halfDayPart, startTime, endTime],
+          leaveUnit, halfDayPart, startTime, endTime, leaveTypeId],
       );
       id = rows[0].id;
     } catch (err) {
       if ((err as { code?: string }).code === '23505') throw new AppError('REQUEST_ALREADY_OPEN');
       throw err;
+    }
+    for (const a of attachments) {
+      await tx.query(
+        `insert into request_attachments (request_id, file_name, content_type, bytes, created_at) values ($1, $2, $3, $4, $5)`,
+        [id, a.name, a.contentType, Buffer.from(a.bytes), now],
+      );
     }
     if (previousStatus) {
       await tx.query(`update attendance_records set status = 'pending_correction', updated_at = $2 where id = $1`, [recordId, now]);
@@ -186,9 +237,13 @@ const REQUEST_SELECT = `
          rv.name_km as "reviewerKm", rv.name_en as "reviewerEn",
          r.work_date::text as "workDate", r.clock_in_at as "clockInAt", r.clock_out_at as "clockOutAt",
          r.late_minutes as "lateMinutes", r.branch_id as "branchId", b.name_km as "branchKm", b.name_en as "branchEn",
-         b.timezone
+         b.timezone, q.leave_type_id as "leaveTypeId", lt.name_km as "leaveTypeKm", lt.name_en as "leaveTypeEn",
+         coalesce((select json_agg(json_build_object('id', a.id, 'name', a.file_name, 'contentType', a.content_type,
+                                                     'size', octet_length(a.bytes)) order by a.created_at)
+                   from request_attachments a where a.request_id = q.id), '[]'::json) as attachments
   from employee_requests q
   join employees e on e.id = q.employee_id
+  left join leave_types lt on lt.id = q.leave_type_id
   left join employees rv on rv.id = q.reviewer_employee_id
   left join attendance_records r on r.id = q.attendance_record_id
   left join branches b on b.id = r.branch_id`;
@@ -341,6 +396,37 @@ export async function getRecordHistory(db: Db, actor: Actor, recordId: string) {
     ),
   ]);
   return { events, adjustments };
+}
+
+// ---- attachments ---------------------------------------------------------------------
+
+export type Attachment = { name: string; contentType: string; bytes: Uint8Array };
+
+async function readAttachment(db: Db, requestId: string, attachmentId: string) {
+  const rows = await db.query<{ file_name: string; content_type: string; bytes: Uint8Array; employee_id: string; org_id: string }>(
+    `select a.file_name, a.content_type, a.bytes, q.employee_id, q.org_id
+     from request_attachments a join employee_requests q on q.id = a.request_id
+     where a.id = $1 and a.request_id = $2`,
+    [attachmentId, requestId],
+  );
+  return rows[0];
+}
+
+/** A file from the employee's own request. Anyone else's is indistinguishable from one that does not exist. */
+export async function getMyAttachment(db: Db, employeeId: string, requestId: string, attachmentId: string): Promise<Attachment> {
+  const row = await readAttachment(db, requestId, attachmentId);
+  if (!row || row.employee_id !== employeeId) throw new AppError('NOT_FOUND');
+  return { name: row.file_name, contentType: row.content_type, bytes: row.bytes };
+}
+
+/** A file from a request the actor may review, under the same branch scope as the request list. */
+export async function getRequestAttachment(db: Db, actor: Actor, requestId: string, attachmentId: string): Promise<Attachment> {
+  const row = await readAttachment(db, requestId, attachmentId);
+  if (!row || row.org_id !== actor.orgId) throw new AppError('NOT_FOUND');
+  const branches = await db.query<{ branch_id: string }>(`select branch_id from employee_branches where employee_id = $1`, [row.employee_id]);
+  const inScope = can(actor.grants, 'request.review') || branches.some((b) => can(actor.grants, 'request.review', b.branch_id));
+  if (!inScope) throw new AppError('NOT_FOUND');
+  return { name: row.file_name, contentType: row.content_type, bytes: row.bytes };
 }
 
 // ---- review ------------------------------------------------------------------------

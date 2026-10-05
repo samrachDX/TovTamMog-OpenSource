@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { api } from '@/lib/client/api';
 import { useI18n } from '@/components/mini-app/i18n-context';
+import { AttachmentList, type AttachmentRef } from '@/components/AttachmentList';
 import { usePortal } from '../PortalShell';
 import {
   Badge, Card, DataTable, Dialog, Field, LoadState, Notice, PageHeader, Pager, Select, SmallButton, useLoad, type Column,
@@ -17,6 +18,7 @@ type Item = {
   createdAt: string; decidedAt: string | null; decisionNote: string | null; employeeId: string; employeeCode: string;
   nameKm: string; nameEn: string | null; reviewerKm: string | null; reviewerEn: string | null;
   branchId: string | null; branchKm: string | null; branchEn: string | null;
+  leaveTypeKm: string | null; leaveTypeEn: string | null; attachments: AttachmentRef[];
 };
 
 const KINDS: Kind[] = ['leave', 'absence', 'late', 'missed_clock_out', 'correction'];
@@ -48,9 +50,25 @@ export function Requests() {
     if (r.leaveUnit === 'hours') return `${day(r.startDate)} · ${num(r.startTime ?? '')}–${num(r.endTime ?? '')}`;
     return r.endDate && r.endDate !== r.startDate ? `${day(r.startDate)} – ${day(r.endDate)}` : day(r.startDate);
   };
+  const kindLabel = (r: Item) => (r.leaveTypeKm ? name({ nameKm: r.leaveTypeKm, nameEn: r.leaveTypeEn }) : t(`requests.type.${r.type}`));
   const columns: Column<Item>[] = [
     { header: t('portal.emp.name'), primary: true, cell: (r) => <span>{name(r)} <span className="text-muted">· {r.employeeCode}</span></span> },
-    { header: t('requests.kind'), cell: (r) => t(`requests.type.${r.type}`) },
+    {
+      header: t('requests.kind'),
+      cell: (r) => (
+        <span className="inline-flex items-center gap-1.5">
+          {kindLabel(r)}
+          {r.attachments?.length ? (
+            <span className="inline-flex items-center gap-0.5 text-xs text-muted" title={t('requests.attachments')}>
+              <svg viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m21 11-8.6 8.6a5 5 0 0 1-7-7l8.5-8.6a3.4 3.4 0 0 1 4.8 4.8l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9" />
+              </svg>
+              <span className="sr-only">{t('requests.attachments')}:</span>{num(r.attachments.length)}
+            </span>
+          ) : null}
+        </span>
+      ),
+    },
     { header: t('portal.date'), cell: period },
     { header: t('portal.reason'), cell: (r) => <span className="line-clamp-2">{r.reason}</span> },
     { header: t('requests.submitted'), cell: (r) => dateTime(r.createdAt) },
@@ -116,6 +134,7 @@ export function Requests() {
           <>
             <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
               <Row label={t('portal.emp.name')} value={`${name(open)} · ${open.employeeCode}`} />
+              {open.leaveTypeKm ? <Row label={t('requests.leaveType')} value={kindLabel(open)} /> : null}
               <Row label={t('portal.date')} value={period(open)} />
               {open.branchKm ? <Row label={t('home.branch')} value={name({ nameKm: open.branchKm, nameEn: open.branchEn })} /> : null}
               <Row label={t('portal.status')} value={<Badge tone={TONE[open.status]}>{t(`requests.status.${open.status}`)}</Badge>} />
@@ -148,6 +167,12 @@ export function Requests() {
               <p className="mb-1 text-muted">{t('portal.reason')}</p>
               <p className="whitespace-pre-wrap">{open.reason}</p>
             </div>
+            {open.attachments?.length ? (
+              <div className="flex flex-col gap-1 text-sm">
+                <p className="text-muted">{t('requests.attachments')}</p>
+                <AttachmentList base={`/api/portal/requests/${open.id}/attachments`} files={open.attachments} />
+              </div>
+            ) : null}
             {open.decidedAt ? (
               <p className="text-sm text-muted">
                 {t('requests.decidedBy', { name: open.reviewerKm ? name({ nameKm: open.reviewerKm, nameEn: open.reviewerEn }) : '—', at: dateTime(open.decidedAt) })}

@@ -18,7 +18,7 @@ const GROUPS: { title: MessageKey; items: string[] }[] = [
   { title: 'nav.employees', items: ['employee.view', 'employee.create', 'employee.update', 'employee.enroll', 'employee.pin_reset', 'employee.sensitive.view'] },
   { title: 'nav.schedule', items: ['schedule.view', 'schedule.manage'] },
   { title: 'nav.attendance', items: ['attendance.clock', 'attendance.view', 'attendance.attempts.view', 'attendance.approve', 'attendance.adjust', 'report.export'] },
-  { title: 'nav.requests', items: ['request.create', 'request.review'] },
+  { title: 'nav.requests', items: ['request.create', 'request.review', 'leave_type.manage'] },
   { title: 'nav.events', items: ['event.create', 'event.publish', 'notification.send'] },
   { title: 'nav.branches', items: ['branch.view', 'branch.manage', 'security.settings.manage'] },
   { title: 'portal.role.admin', items: ['role.assign', 'role.manage', 'audit.view'] },

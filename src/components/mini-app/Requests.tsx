@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/client/api';
+import { AttachmentList, type AttachmentRef } from '@/components/AttachmentList';
 import { useI18n } from './i18n-context';
 import { Button, Header, Notice, Spinner } from './ui';
 import type { RequestKind } from './RequestForm';
@@ -12,6 +13,7 @@ type Item = {
   leaveUnit: 'day' | 'half_day' | 'hours'; halfDayPart: 'morning' | 'afternoon' | null; startTime: string | null; endTime: string | null; proposedClockInAt: string | null;
   proposedClockOutAt: string | null; createdAt: string; decidedAt: string | null; decisionNote: string | null;
   reviewerKm: string | null; reviewerEn: string | null;
+  leaveTypeKm: string | null; leaveTypeEn: string | null; attachments: AttachmentRef[];
 };
 
 const TONE = {
@@ -75,13 +77,16 @@ export function Requests({ onNew }: { onNew(kind: RequestKind): void }) {
         {(state.items ?? []).map((r) => (
           <li key={r.id} className="rounded-xl border border-line p-3 text-sm">
             <div className="mb-1 flex items-center justify-between gap-2">
-              <span className="font-semibold">{t(`requests.type.${r.type}`)}</span>
+              <span className="font-semibold">
+                {r.leaveTypeKm ? (km ? r.leaveTypeKm : r.leaveTypeEn || r.leaveTypeKm) : t(`requests.type.${r.type}`)}
+              </span>
               <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${TONE[r.status]}`}>{t(`requests.status.${r.status}`)}</span>
             </div>
             <p className="text-muted">{period(r)}</p>
             {r.proposedClockInAt ? <p>{t('requests.correctIn')}: <span className="font-semibold tabular-nums">{time(r.proposedClockInAt)}</span></p> : null}
             {r.proposedClockOutAt ? <p>{t('requests.correctOut')}: <span className="font-semibold tabular-nums">{time(r.proposedClockOutAt)}</span></p> : null}
             <p className="mt-1">{r.reason}</p>
+            {r.attachments?.length ? <div className="mt-2"><AttachmentList base={`/api/requests/${r.id}/attachments`} files={r.attachments} /></div> : null}
             <p className="mt-1 text-xs text-muted">{t('requests.submittedAt', { at: dateTime(r.createdAt) })}</p>
             {r.decidedAt ? (
               <p className="mt-1 rounded-lg bg-pale px-2 py-1 text-xs">

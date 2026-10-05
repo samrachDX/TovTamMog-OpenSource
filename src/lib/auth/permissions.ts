@@ -14,6 +14,7 @@ export const PERMISSIONS = [
   'report.export',
   'audit.view',
   'role.assign', 'role.manage',
+  'leave_type.manage',
   'security.settings.manage',
 ] as const;
 

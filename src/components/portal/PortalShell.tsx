@@ -42,6 +42,9 @@ export function usePortal(): Portal {
   return ctx;
 }
 
+/** Pages about the whole organization, shown only to people who hold the permission org-wide. */
+const ORG_WIDE = new Set(['audit.view', 'leave_type.manage']);
+
 const NAV: { href: string; label: MessageKey; icon: NavIconName; permission: string }[] = [
   { href: '/admin', label: 'nav.dashboard', icon: 'dashboard', permission: 'attendance.view' },
   { href: '/hr/employees', label: 'nav.employees', icon: 'employees', permission: 'employee.view' },
@@ -50,6 +53,7 @@ const NAV: { href: string; label: MessageKey; icon: NavIconName; permission: str
   { href: '/hr/requests', label: 'nav.requests', icon: 'requests', permission: 'request.review' },
   { href: '/admin/events', label: 'nav.events', icon: 'events', permission: 'event.create' },
   { href: '/admin/branches', label: 'nav.branches', icon: 'branches', permission: 'branch.view' },
+  { href: '/admin/leave-types', label: 'nav.leaveTypes', icon: 'leaveTypes', permission: 'leave_type.manage' },
   { href: '/admin/roles', label: 'nav.roles', icon: 'roles', permission: 'role.manage' },
   { href: '/admin/audit', label: 'nav.audit', icon: 'audit', permission: 'audit.view' },
 ];
@@ -273,7 +277,7 @@ function Frame({ me, children, onSignOut }: { me: PortalMe; children: ReactNode;
     };
   }, [me, locale]);
 
-  const links = NAV.filter((n) => portal.can(n.permission) && (n.permission !== 'audit.view' || portal.canOrg('audit.view')));
+  const links = NAV.filter((n) => portal.can(n.permission) && (!ORG_WIDE.has(n.permission) || portal.canOrg(n.permission)));
   const active = (href: string) => (href === '/admin' ? pathname === '/admin' : pathname.startsWith(href));
 
   // On phones the nav scrolls sideways; bring the current page's link into view.
