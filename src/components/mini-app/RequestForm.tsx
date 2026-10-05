@@ -7,6 +7,12 @@ import { localDate } from '@/lib/i18n';
 import { useI18n } from './i18n-context';
 import { Button, Header, Notice } from './ui';
 
+/**
+ * Opened from the Clock button without scanning: the form asks for just the one time
+ * being corrected, clock-in when they have not clocked in yet, clock-out when they have.
+ */
+export type ClockFocus = { only: 'in' | 'out'; date?: string };
+
 export type RecordRef = { id: string; workDate: string; clockInAt: string | null; clockOutAt: string | null };
 export type RequestKind = 'leave' | 'absence' | 'late' | 'missed_clock_out' | 'correction' | 'overtime' | 'missed_clock_in';
 
@@ -37,10 +43,12 @@ function nextDay(day: string): string {
  * One form for every request type. Leave and absence take dates; the record-based types
  * are opened from a history entry and take the corrected times for that day.
  */
-export function RequestForm({ kind, record, onDone }: { kind: RequestKind; record?: RecordRef; onDone(saved: boolean): void }) {
+export function RequestForm({ kind, record, focus, onDone }: {
+  kind: RequestKind; record?: RecordRef; focus?: ClockFocus; onDone(saved: boolean): void;
+}) {
   const { t, locale, timeZone, day, time, num, errorText } = useI18n();
   const today = localDate(new Date(), timeZone);
-  const [startDate, setStartDate] = useState(today);
+  const [startDate, setStartDate] = useState(focus?.date ?? today);
   const [endDate, setEndDate] = useState(today);
   const [unit, setUnit] = useState<'day' | 'half_day' | 'hours'>('day');
   const [part, setPart] = useState<'morning' | 'afternoon'>('morning');
@@ -125,7 +133,9 @@ export function RequestForm({ kind, record, onDone }: { kind: RequestKind; recor
   // Still clocked in: the clock-out is the time they left without scanning; the clock-in only if it was wrong too.
   const openShift = kind === 'correction' && !!record && !record.clockOutAt;
   const missedIn = kind === 'missed_clock_in';
-  const timesOk = missedIn ? !!clockIn : kind === 'correction' ? !!(clockIn || clockOut) : needsOut ? !!clockOut : true;
+  const onlyIn = focus?.only === 'in';
+  const onlyOut = focus?.only === 'out';
+  const timesOk = missedIn ? !!clockIn : onlyOut ? !!clockOut : kind === 'correction' ? !!(clockIn || clockOut) : needsOut ? !!clockOut : true;
   const leaveOk = kind !== 'leave' || (unit === 'day' ? endDate >= startDate : unit === 'hours' ? toTime > fromTime : true);
   const typeOk = kind !== 'leave' || (!!typeId && (!needsFile || files.length > 0));
   const otMinutes = overtimeMinutes(otFrom, otTo);
@@ -174,7 +184,10 @@ export function RequestForm({ kind, record, onDone }: { kind: RequestKind; recor
 
   return (
     <form className="flex flex-1 flex-col gap-4" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
-      <Header title={t(`requests.type.${kind}`)} body={t(`requests.help.${kind}`)} />
+      <Header
+        title={t(onlyIn ? 'requests.fixIn.title' : onlyOut ? 'requests.fixOut.title' : `requests.type.${kind}`)}
+        body={t(onlyIn ? 'requests.fixIn.help' : onlyOut ? 'requests.fixOut.help' : `requests.help.${kind}`)}
+      />
 
       {record ? (
         <dl className="grid grid-cols-3 gap-2 rounded-xl bg-pale p-3 text-sm">
@@ -281,26 +294,28 @@ export function RequestForm({ kind, record, onDone }: { kind: RequestKind; recor
         </>
       ) : null}
 
-      {kind === 'correction' ? (
+      {kind === 'correction' && !onlyOut ? (
         <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('requests.correctIn')}</span>
           <input type="time" className={INPUT} value={clockIn} onChange={(e) => setClockIn(e.target.value)} />
         </label>
       ) : null}
-      {openShift ? <p className="rounded-xl bg-pale px-3 py-2 text-sm">{t('requests.openShiftNote')}</p> : null}
+      {openShift && !onlyOut ? <p className="rounded-xl bg-pale px-3 py-2 text-sm">{t('requests.openShiftNote')}</p> : null}
       {missedIn ? (
         <>
-          <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('portal.date')}</span>
-            <input type="date" required className={INPUT} value={startDate} max={today} onChange={(e) => setStartDate(e.target.value)} />
-          </label>
-          <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('attendance.forgot.actualIn')}</span>
+          {onlyIn ? null : (
+            <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('portal.date')}</span>
+              <input type="date" required className={INPUT} value={startDate} max={today} onChange={(e) => setStartDate(e.target.value)} />
+            </label>
+          )}
+          <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t(onlyIn ? 'requests.correctIn' : 'attendance.forgot.actualIn')}</span>
             <input type="time" required className={INPUT} value={clockIn} onChange={(e) => setClockIn(e.target.value)} />
           </label>
         </>
       ) : null}
-      {kind === 'correction' || needsOut || missedIn ? (
+      {(kind === 'correction' || needsOut || missedIn) && !onlyIn ? (
         <>
-          <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t(missedIn ? 'requests.outOptional' : openShift ? 'attendance.forgot.actualOut' : 'requests.correctOut')}</span>
-            <input type="time" required={needsOut} className={INPUT} value={clockOut} onChange={(e) => setClockOut(e.target.value)} />
+          <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t(missedIn ? 'requests.outOptional' : openShift && !onlyOut ? 'attendance.forgot.actualOut' : 'requests.correctOut')}</span>
+            <input type="time" required={needsOut || onlyOut} className={INPUT} value={clockOut} onChange={(e) => setClockOut(e.target.value)} />
           </label>
           <label className="flex min-h-11 items-center gap-3 text-sm">
             <input type="checkbox" className="size-5" checked={outNextDay} onChange={(e) => setOutNextDay(e.target.checked)} />

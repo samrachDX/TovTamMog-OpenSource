@@ -14,7 +14,7 @@ import { Home, type Me } from './Home';
 import { I18nProvider, useI18n } from './i18n-context';
 import { Notifications } from './Notifications';
 import { PinPad } from './PinPad';
-import { RequestForm, type RecordRef, type RequestKind } from './RequestForm';
+import { RequestForm, type ClockFocus, type RecordRef, type RequestKind } from './RequestForm';
 import { Requests } from './Requests';
 import { Button, Header, LanguageSwitch, Notice, Screen, Spinner } from './ui';
 
@@ -25,7 +25,7 @@ type Phase =
   | { name: 'pin_setup'; first?: string; mismatch?: boolean }
   | { name: 'pin_required' }
   | { name: 'ready'; me: Me; tab: Tab }
-  | { name: 'request'; me: Me; back: Tab; kind: RequestKind; record?: RecordRef }
+  | { name: 'request'; me: Me; back: Tab; kind: RequestKind; record?: RecordRef; focus?: ClockFocus }
   | { name: 'clocking'; me: Me; action: 'clock_in' | 'clock_out' }
   | { name: 'error'; message: string };
 
@@ -254,7 +254,7 @@ function Flow() {
           {tab === 'home' ? <Home
               me={me}
               onClock={(action) => setPhase({ name: 'clocking', me, action })}
-              onRequest={(kind, record) => setPhase({ name: 'request', me, back: 'home', kind, record })}
+              onRequest={(kind, record, focus) => setPhase({ name: 'request', me, back: 'home', kind, record, focus })}
             /> : null}
           {tab === 'history' ? <History onRequest={(kind, record) => setPhase({ name: 'request', me, back: 'history', kind, record })} /> : null}
           {tab === 'requests' ? <Requests onNew={(kind) => setPhase({ name: 'request', me, back: 'requests', kind })} /> : null}
@@ -276,6 +276,7 @@ function Flow() {
           <RequestForm
             kind={phase.kind}
             record={phase.record}
+            focus={phase.focus}
             // After sending, show the list of requests; after cancelling, go back where they were.
             onDone={(saved) => setPhase({ name: 'ready', me: phase.me, tab: saved ? 'requests' : phase.back })}
           />

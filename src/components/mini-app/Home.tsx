@@ -6,7 +6,7 @@ import { useI18n } from './i18n-context';
 import { Avatar } from '@/components/Avatar';
 import { LottieAnimation } from '@/components/LottieAnimation';
 import { FeedSection, type Feed } from './Feed';
-import type { RecordRef, RequestKind } from './RequestForm';
+import type { ClockFocus, RecordRef, RequestKind } from './RequestForm';
 import { Button, LanguageSwitch, Notice } from './ui';
 
 export type Me = {
@@ -24,7 +24,7 @@ export type Me = {
   overview: {
     state: 'not_clocked_in' | 'clocked_in' | 'completed' | 'missed_clock_out' | 'absent' | 'pending_correction' | 'under_review';
     nextAction: 'clock_in' | 'clock_out' | null;
-    shift: { branchId: string; startAt: string; endAt: string } | null;
+    shift: { branchId: string; workDate: string; startAt: string; endAt: string } | null;
     record: {
       id: string;
       workDate: string;
@@ -52,7 +52,7 @@ const STATE_TONE: Record<Me['overview']['state'], string> = {
 };
 
 export function Home({ me, onClock, onRequest }: {
-  me: Me; onClock(action: 'clock_in' | 'clock_out'): void; onRequest(kind: RequestKind, record?: RecordRef): void;
+  me: Me; onClock(action: 'clock_in' | 'clock_out'): void; onRequest(kind: RequestKind, record?: RecordRef, focus?: ClockFocus): void;
 }) {
   const [choosing, setChoosing] = useState(false);
   const { t, locale, timeZone, time, longDate } = useI18n();
@@ -150,8 +150,9 @@ export function Home({ me, onClock, onRequest }: {
                 className="min-h-14"
                 onClick={() => {
                   setChoosing(false);
-                  if (overview.nextAction === 'clock_in') onRequest('missed_clock_in');
-                  else if (record) onRequest('correction', record);
+                  // Not clocked in yet: correct the clock-in. Already clocked in: correct the clock-out.
+                  if (overview.nextAction === 'clock_in') onRequest('missed_clock_in', undefined, { only: 'in', date: overview.shift?.workDate });
+                  else if (record) onRequest('correction', record, { only: 'out' });
                 }}
               >
                 {t(overview.nextAction === 'clock_in' ? 'attendance.choose.forgotIn' : 'attendance.choose.forgotOut')}
