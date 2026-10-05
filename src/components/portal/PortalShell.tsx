@@ -61,6 +61,7 @@ const NAV: { title: MessageKey; items: NavItem[] }[] = [
       { href: '/hr/attendance', label: 'nav.attendance', icon: 'attendance', permission: 'attendance.view' },
       { href: '/hr/requests', label: 'nav.requests', icon: 'requests', permission: 'request.review' },
       { href: '/admin/leave-types', label: 'nav.leaveTypes', icon: 'leaveTypes', permission: 'leave_type.manage' },
+      { href: '/hr/reports', label: 'nav.reports', icon: 'reports', permission: 'attendance.view' },
     ],
   },
   {

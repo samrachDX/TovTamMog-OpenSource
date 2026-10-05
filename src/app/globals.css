@@ -126,3 +126,19 @@ input {
     animation: none;
   }
 }
+
+/* Report printing: only the report document is printed, on A4. */
+.print-root {
+  display: none;
+}
+@media print {
+  body.printing > :not(.print-root) {
+    display: none !important;
+  }
+  body.printing .print-root {
+    display: block;
+  }
+  body.printing {
+    background: #fff;
+  }
+}

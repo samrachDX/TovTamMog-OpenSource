@@ -5,7 +5,7 @@ import { api } from '@/lib/client/api';
 import { AttachmentList, type AttachmentRef } from '@/components/AttachmentList';
 import { useI18n } from './i18n-context';
 import { Button, Header, Notice, Spinner } from './ui';
-import type { RequestKind } from './RequestForm';
+import { overtimeMinutes, type RequestKind } from './RequestForm';
 
 type Item = {
   id: string; type: RequestKind; status: 'pending' | 'approved' | 'rejected' | 'cancelled'; reason: string;
@@ -54,6 +54,10 @@ export function Requests({ onNew }: { onNew(kind: RequestKind): void }) {
   const km = locale === 'km-KH';
   const period = (r: Item) => {
     if (!r.startDate) return r.workDate ? day(r.workDate) : '';
+    if (r.type === 'overtime' && r.startTime && r.endTime) {
+      const m = overtimeMinutes(r.startTime, r.endTime);
+      return `${day(r.startDate)} · ${num(r.startTime)}–${num(r.endTime)} · ${t('requests.otHours', { hours: num(Math.floor(m / 60)), minutes: num(String(m % 60).padStart(2, '0')) })}`;
+    }
     if (r.leaveUnit === 'half_day' && r.halfDayPart) return `${day(r.startDate)} · ${t(`requests.part.${r.halfDayPart}`)}`;
     if (r.leaveUnit === 'hours') return `${day(r.startDate)} · ${num(r.startTime ?? '')}–${num(r.endTime ?? '')}`;
     return r.endDate && r.endDate !== r.startDate ? `${day(r.startDate)} – ${day(r.endDate)}` : day(r.startDate);
@@ -65,6 +69,7 @@ export function Requests({ onNew }: { onNew(kind: RequestKind): void }) {
       <div className="grid grid-cols-2 gap-3">
         <Button onClick={() => onNew('leave')}>{t('requests.type.leave')}</Button>
         <Button variant="secondary" onClick={() => onNew('absence')}>{t('requests.type.absence')}</Button>
+        <Button variant="secondary" className="col-span-2" onClick={() => onNew('overtime')}>{t('requests.type.overtime')}</Button>
       </div>
       <p className="text-sm text-muted">{t('requests.correctionHint')}</p>
 

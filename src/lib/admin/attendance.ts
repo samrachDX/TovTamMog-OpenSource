@@ -44,10 +44,14 @@ export async function listAttendance(db: Db, actor: Actor, filter: Input) {
             r.late_minutes as "lateMinutes", r.early_leave_minutes as "earlyLeaveMinutes", r.worked_minutes as "workedMinutes",
             e.id as "employeeId", e.employee_code as "employeeCode", e.name_km as "nameKm", e.name_en as "nameEn",
             b.id as "branchId", b.name_km as "branchKm", b.name_en as "branchEn",
-            sa.start_at as "shiftStartAt", sa.end_at as "shiftEndAt"
+            sa.start_at as "shiftStartAt", sa.end_at as "shiftEndAt",
+            h.regular_minutes as "regularMinutes", h.early_arrival_minutes as "earlyArrivalMinutes",
+            h.requested_ot_minutes as "requestedOtMinutes", h.approved_ot_minutes as "approvedOtMinutes",
+            h.recognized_ot_minutes as "recognizedOtMinutes", h.extra_minutes as "extraMinutes", h.recognized_minutes as "recognizedMinutes"
      from attendance_records r
      join employees e on e.id = r.employee_id
      join branches b on b.id = r.branch_id
+     join attendance_hours h on h.record_id = r.id
      left join shift_assignments sa on sa.id = r.shift_assignment_id
      where ${where}
      order by r.work_date desc, r.clock_in_at desc nulls last
@@ -236,11 +240,13 @@ export async function exportAttendanceCsv(db: Db, actor: Actor, filter: Input, h
             to_char(sa.start_at at time zone $5, 'HH24:MI') as shift_start, to_char(sa.end_at at time zone $5, 'HH24:MI') as shift_end,
             to_char(r.clock_in_at at time zone $5, 'YYYY-MM-DD HH24:MI') as clock_in,
             to_char(r.clock_out_at at time zone $5, 'YYYY-MM-DD HH24:MI') as clock_out,
-            r.late_minutes, r.early_leave_minutes, r.worked_minutes, r.status,
+            r.late_minutes, r.early_leave_minutes, r.worked_minutes, h.regular_minutes, h.recognized_ot_minutes, h.extra_minutes,
+            h.recognized_minutes, r.status,
             (select count(*)::int from attendance_adjustments a where a.record_id = r.id) as adjustments
      from attendance_records r
      join employees e on e.id = r.employee_id
      join branches b on b.id = r.branch_id
+     join attendance_hours h on h.record_id = r.id
      left join shift_assignments sa on sa.id = r.shift_assignment_id
      where r.org_id = $1 and ($2::uuid[] is null or r.branch_id = any($2::uuid[])) and r.work_date between $3::date and $4::date
      order by r.work_date, b.name_en, e.employee_code
@@ -251,7 +257,8 @@ export async function exportAttendanceCsv(db: Db, actor: Actor, filter: Input, h
   for (const r of rows) {
     lines.push([
       r.d, r.code, r.name_km, r.name_en, r.branch_km, r.branch_en, r.shift_start, r.shift_end, r.clock_in, r.clock_out,
-      r.late_minutes, r.early_leave_minutes, r.worked_minutes, statusLabel(String(r.status)), r.adjustments,
+      r.late_minutes, r.early_leave_minutes, r.worked_minutes, r.regular_minutes, r.recognized_ot_minutes, r.extra_minutes,
+      r.recognized_minutes, statusLabel(String(r.status)), r.adjustments,
     ].map(csvCell).join(','));
   }
   // The byte order mark makes Excel read Khmer text as UTF-8.

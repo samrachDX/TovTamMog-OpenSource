@@ -7,7 +7,8 @@ import { handle, portalActor, queryInput, requestLocale } from '@/lib/http';
 const HEADERS: MessageKey[] = [
   'portal.date', 'home.employeeCode', 'portal.nameKm', 'portal.nameEn', 'portal.csv.branchKm', 'portal.csv.branchEn',
   'portal.csv.shiftStart', 'portal.csv.shiftEnd', 'home.clockInTime', 'home.clockOutTime', 'portal.csv.lateMinutes',
-  'portal.csv.earlyMinutes', 'portal.csv.workedMinutes', 'portal.status', 'portal.csv.adjustments',
+  'portal.csv.earlyMinutes', 'portal.csv.workedMinutes', 'portal.csv.regularMinutes', 'portal.csv.otMinutes',
+  'portal.csv.extraMinutes', 'portal.csv.recognizedMinutes', 'portal.status', 'portal.csv.adjustments',
 ];
 
 /** Attendance for a date range as a CSV download. Exports are logged. */

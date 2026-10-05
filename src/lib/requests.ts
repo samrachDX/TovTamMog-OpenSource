@@ -12,12 +12,24 @@ import { DATE, TIME, date, oneOf, optText, optUuid, paging, requireCan, scopeOf,
 
 type Input = Record<string, unknown>;
 
-export const REQUEST_TYPES = ['leave', 'absence', 'late', 'missed_clock_out', 'correction'] as const;
+export const REQUEST_TYPES = ['leave', 'absence', 'late', 'missed_clock_out', 'correction', 'overtime'] as const;
 export type RequestType = (typeof REQUEST_TYPES)[number];
 export type RequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
 const MINUTE = 60_000;
 const MAX_LEAVE_DAYS = 60;
+/** Overtime can be asked for up to a month either side of today, for at most 12 hours at a time. */
+const OVERTIME_WINDOW_DAYS = 31;
+const MAX_OVERTIME_MINUTES = 12 * 60;
+
+/** Minutes from the start of the work date; an end at or before the start is the next day. */
+export function overtimeSpan(startTime: string, endTime: string): { from: number; to: number } {
+  const m = (v: string) => Number(v.slice(0, 2)) * 60 + Number(v.slice(3, 5));
+  const from = m(startTime);
+  let to = m(endTime);
+  if (to <= from) to += 24 * 60;
+  return { from, to };
+}
 
 /**
  * Supporting files sent with a request. The whole upload has to fit in one request to the
@@ -154,6 +166,25 @@ export async function createRequest(
       endDate = input.endDate === undefined || type === 'absence' || leaveUnit !== 'day' ? startDate : date(input, 'endDate');
       const days = (Date.parse(endDate) - Date.parse(startDate)) / 86_400_000;
       if (days < 0 || days >= MAX_LEAVE_DAYS) throw new AppError('DATE_RANGE_INVALID');
+    } else if (type === 'overtime') {
+      startDate = date(input, 'startDate');
+      endDate = startDate;
+      startTime = time(input, 'startTime');
+      endTime = time(input, 'endTime');
+      if (startTime === endTime) throw new AppError('INVALID_TIME_RANGE');
+      const span = overtimeSpan(startTime, endTime);
+      if (span.to - span.from > MAX_OVERTIME_MINUTES) throw new AppError('INVALID_TIME_RANGE');
+      const offset = (Date.parse(`${startDate}T00:00:00Z`) - Date.parse(`${now.toISOString().slice(0, 10)}T00:00:00Z`)) / 86_400_000;
+      if (Math.abs(offset) > OVERTIME_WINDOW_DAYS) throw new AppError('DATE_RANGE_INVALID');
+      // Two open requests may not cover the same minutes.
+      const open = await tx.query<{ start_time: string; end_time: string }>(
+        `select to_char(start_time, 'HH24:MI') as start_time, to_char(end_time, 'HH24:MI') as end_time from employee_requests
+         where employee_id = $1 and type = 'overtime' and start_date = $2::date and status in ('pending', 'approved')`,
+        [who.employeeId, startDate],
+      );
+      if (open.some((o) => { const x = overtimeSpan(o.start_time, o.end_time); return x.from < span.to && span.from < x.to; })) {
+        throw new AppError('REQUEST_ALREADY_OPEN');
+      }
     } else {
       recordId = uuid(input, 'attendanceRecordId');
       const rec = await lockRecord(tx, recordId);
@@ -240,7 +271,15 @@ const REQUEST_SELECT = `
          b.timezone, q.leave_type_id as "leaveTypeId", lt.name_km as "leaveTypeKm", lt.name_en as "leaveTypeEn",
          coalesce((select json_agg(json_build_object('id', a.id, 'name', a.file_name, 'contentType', a.content_type,
                                                      'size', octet_length(a.bytes)) order by a.created_at)
-                   from request_attachments a where a.request_id = q.id), '[]'::json) as attachments
+                   from request_attachments a where a.request_id = q.id), '[]'::json) as attachments,
+         case when q.type = 'overtime' then (
+           select json_build_object('startAt', sa.start_at, 'endAt', sa.end_at) from shift_assignments sa
+           where sa.employee_id = q.employee_id and sa.work_date = q.start_date and sa.status = 'published'
+           order by sa.start_at limit 1) end as "otShift",
+         case when q.type = 'overtime' then (
+           select json_build_object('clockInAt', ar.clock_in_at, 'clockOutAt', ar.clock_out_at)
+           from attendance_records ar where ar.employee_id = q.employee_id and ar.work_date = q.start_date
+           order by ar.clock_in_at nulls last limit 1) end as "otRecord"
   from employee_requests q
   join employees e on e.id = q.employee_id
   left join leave_types lt on lt.id = q.leave_type_id
@@ -490,9 +529,11 @@ export async function decideRequest(db: Db, actor: Actor, id: string, input: Inp
       employee_id: string; org_id: string; type: RequestType; status: string; reason: string;
       attendance_record_id: string | null; previous_record_status: string | null;
       proposed_clock_in_at: Date | null; proposed_clock_out_at: Date | null; leave_unit: string; start_date: string | null;
+      start_time: string | null; end_time: string | null;
     }>(
       `select employee_id, org_id, type, status, reason, attendance_record_id, previous_record_status,
-              proposed_clock_in_at, proposed_clock_out_at, leave_unit, start_date::text as start_date
+              proposed_clock_in_at, proposed_clock_out_at, leave_unit, start_date::text as start_date,
+              to_char(start_time, 'HH24:MI') as start_time, to_char(end_time, 'HH24:MI') as end_time
        from employee_requests where id = $1 for update`,
       [id],
     );
@@ -533,9 +574,18 @@ export async function decideRequest(db: Db, actor: Actor, id: string, input: Inp
       employeeId: req.employee_id, kind: decision === 'approved' ? 'request_approved' : 'request_rejected', data: { requestId: id },
       params: (locale) => ({ type: t(locale, `requests.type.${req.type}` as MessageKey), note: note ?? '—' }),
     }], now);
+    // Overtime decisions carry the hours, so the audit log shows exactly what was recognized.
+    const overtime = req.type === 'overtime' && req.start_time && req.end_time
+      ? (() => { const x = overtimeSpan(req.start_time, req.end_time); return { date: req.start_date, from: req.start_time, to: req.end_time, requestedMinutes: x.to - x.from }; })()
+      : null;
     await recordAudit(tx, {
       orgId: actor.orgId, actorEmployeeId: actor.employeeId, action: `request.${decision}`, entityType: 'employee_request',
-      entityId: id, after: { type: req.type, employeeId: req.employee_id }, reason: note, ip: actor.ip, at: now,
+      entityId: id, before: { status: 'pending' },
+      after: {
+        type: req.type, employeeId: req.employee_id, status: decision,
+        ...(overtime ? { ...overtime, approvedMinutes: decision === 'approved' ? overtime.requestedMinutes : 0 } : {}),
+      },
+      reason: note, ip: actor.ip, at: now,
     });
   });
 }

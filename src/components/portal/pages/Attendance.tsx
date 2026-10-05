@@ -15,6 +15,8 @@ type Rec = {
   id: string; workDate: string; status: RecordStatus; clockInAt: string | null; clockOutAt: string | null;
   lateMinutes: number; earlyLeaveMinutes: number; workedMinutes: number | null; employeeId: string; employeeCode: string; branchId: string;
   nameKm: string; nameEn: string | null; branchKm: string; branchEn: string; shiftStartAt: string | null; shiftEndAt: string | null;
+  regularMinutes: number; earlyArrivalMinutes: number; requestedOtMinutes: number; approvedOtMinutes: number;
+  recognizedOtMinutes: number; extraMinutes: number; recognizedMinutes: number;
 };
 type Attempt = {
   id: string; createdAt: string; action: 'clock_in' | 'clock_out'; outcome: 'accepted' | 'rejected'; failureCodes: string[];
@@ -88,17 +90,36 @@ export function Attendance() {
   const hours = (m: number | null) => (m === null ? '—' : `${num(Math.floor(m / 60))}:${num(String(m % 60).padStart(2, '0'))}`);
   const recordColumns: Column<Rec>[] = [
     { header: t('portal.emp.name'), primary: true, cell: (r) => <span>{name(r)} <span className="text-muted">· {r.employeeCode}</span></span> },
-    { header: t('portal.date'), cell: (r) => day(r.workDate) },
+    { header: t('portal.date'), cell: (r) => <span className="whitespace-nowrap">{day(r.workDate)}</span> },
     { header: t('home.branch'), cell: (r) => name({ nameKm: r.branchKm, nameEn: r.branchEn }) },
-    { header: t('home.shift'), cell: (r) => (r.shiftStartAt && r.shiftEndAt ? `${time(r.shiftStartAt)}–${time(r.shiftEndAt)}` : '—') },
+    { header: t('home.shift'), cell: (r) => (r.shiftStartAt && r.shiftEndAt ? <span className="whitespace-nowrap">{time(r.shiftStartAt)}–{time(r.shiftEndAt)}</span> : '—') },
     { header: t('home.clockInTime'), cell: (r) => (r.clockInAt ? time(r.clockInAt) : '—') },
     { header: t('home.clockOutTime'), cell: (r) => (r.clockOutAt ? time(r.clockOutAt) : '—') },
-    { header: t('portal.att.worked'), cell: (r) => hours(r.workedMinutes), align: 'right' },
+    { header: t('reports.col.regular'), cell: (r) => (r.clockOutAt ? hours(r.regularMinutes) : '—'), align: 'right' },
+    {
+      header: t('reports.col.overtime'),
+      align: 'right',
+      cell: (r) => (
+        <span className="inline-flex flex-col items-end gap-0.5">
+          {r.recognizedOtMinutes ? (
+            <span className="inline-flex items-center gap-1"><Badge tone="info">OT</Badge>{hours(r.recognizedOtMinutes)}</span>
+          ) : r.requestedOtMinutes || r.extraMinutes ? null : '—'}
+          {r.requestedOtMinutes ? (
+            <span className="text-xs text-muted">
+              {t(r.approvedOtMinutes ? 'reports.att.otApproved' : 'reports.att.otRequested', { hours: hours(r.approvedOtMinutes || r.requestedOtMinutes) })}
+            </span>
+          ) : null}
+          {r.extraMinutes ? <span className="text-xs text-muted" title={t('reports.note.extra')}>{t('reports.att.extra', { hours: hours(r.extraMinutes) })}</span> : null}
+        </span>
+      ),
+    },
+    { header: t('reports.col.recognized'), cell: (r) => (r.clockOutAt ? <span className="font-semibold">{hours(r.recognizedMinutes)}</span> : '—'), align: 'right' },
     { header: t('portal.status'), cell: (r) => (
       <span className="flex flex-wrap gap-1">
         <Badge tone={TONE[r.status]}>{t(`attendance.state.${r.status}`)}</Badge>
         {r.lateMinutes > 0 ? <Badge tone="warn">{t('home.lateBy', { minutes: r.lateMinutes })}</Badge> : null}
         {r.earlyLeaveMinutes > 0 ? <Badge tone="warn">{t('home.earlyBy', { minutes: r.earlyLeaveMinutes })}</Badge> : null}
+        {r.earlyArrivalMinutes >= 15 ? <Badge tone="neutral">{t('reports.att.earlyArrival', { minutes: r.earlyArrivalMinutes })}</Badge> : null}
       </span>
     ) },
   ];

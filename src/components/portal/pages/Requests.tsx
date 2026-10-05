@@ -4,12 +4,13 @@ import { useState } from 'react';
 import { api } from '@/lib/client/api';
 import { useI18n } from '@/components/mini-app/i18n-context';
 import { AttachmentList, type AttachmentRef } from '@/components/AttachmentList';
+import { overtimeMinutes } from '@/components/mini-app/RequestForm';
 import { usePortal } from '../PortalShell';
 import {
   Badge, Card, DataTable, Dialog, Field, LoadState, Notice, PageHeader, Pager, Select, SmallButton, useLoad, type Column,
 } from '../ui';
 
-type Kind = 'leave' | 'absence' | 'late' | 'missed_clock_out' | 'correction';
+type Kind = 'leave' | 'absence' | 'late' | 'missed_clock_out' | 'correction' | 'overtime';
 type Item = {
   id: string; type: Kind; status: 'pending' | 'approved' | 'rejected' | 'cancelled'; reason: string;
   startDate: string | null; endDate: string | null; workDate: string | null;
@@ -19,9 +20,10 @@ type Item = {
   nameKm: string; nameEn: string | null; reviewerKm: string | null; reviewerEn: string | null;
   branchId: string | null; branchKm: string | null; branchEn: string | null;
   leaveTypeKm: string | null; leaveTypeEn: string | null; attachments: AttachmentRef[];
+  otShift: { startAt: string; endAt: string } | null; otRecord: { clockInAt: string | null; clockOutAt: string | null } | null;
 };
 
-const KINDS: Kind[] = ['leave', 'absence', 'late', 'missed_clock_out', 'correction'];
+const KINDS: Kind[] = ['leave', 'absence', 'late', 'missed_clock_out', 'correction', 'overtime'];
 const TONE = { pending: 'warn', approved: 'ok', rejected: 'bad', cancelled: 'muted' } as const;
 const LIMIT = 50;
 
@@ -29,7 +31,11 @@ export function Requests() {
   const { t, locale, day, time, dateTime, num, errorText } = useI18n();
   const { me, name, can } = usePortal();
   const [status, setStatus] = useState('pending');
-  const [type, setType] = useState('');
+  // Other pages link here with ?type=overtime to open the matching list.
+  const [type, setType] = useState(() => {
+    const v = typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('type');
+    return v && (KINDS as string[]).includes(v) ? v : '';
+  });
   const [branchId, setBranchId] = useState('');
   const [offset, setOffset] = useState(0);
   const [open, setOpen] = useState<Item | null>(null);
@@ -44,8 +50,11 @@ export function Requests() {
     [status, type, branchId, offset],
   );
 
+  const otMinutes = (r: Item) => (r.type === 'overtime' && r.startTime && r.endTime ? overtimeMinutes(r.startTime, r.endTime) : 0);
+  const hm = (m: number) => t('requests.otHours', { hours: num(Math.floor(m / 60)), minutes: num(String(m % 60).padStart(2, '0')) });
   const period = (r: Item) => {
     if (!r.startDate) return r.workDate ? day(r.workDate) : '—';
+    if (r.type === 'overtime') return `${day(r.startDate)} · ${num(r.startTime ?? '')}–${num(r.endTime ?? '')} · ${hm(otMinutes(r))}`;
     if (r.leaveUnit === 'half_day' && r.halfDayPart) return `${day(r.startDate)} · ${t(`requests.part.${r.halfDayPart}`)}`;
     if (r.leaveUnit === 'hours') return `${day(r.startDate)} · ${num(r.startTime ?? '')}–${num(r.endTime ?? '')}`;
     return r.endDate && r.endDate !== r.startDate ? `${day(r.startDate)} – ${day(r.endDate)}` : day(r.startDate);
@@ -162,6 +171,13 @@ export function Requests() {
                 </tbody>
               </table>
             ) : null}
+            {open.type === 'overtime' ? (
+              <dl className="grid grid-cols-3 gap-2 rounded-lg border border-line p-3 text-sm">
+                <Row label={t('reports.col.shift')} value={open.otShift ? `${time(open.otShift.startAt)}–${time(open.otShift.endAt)}` : t('reports.noShift')} />
+                <Row label={t('home.clockInTime')} value={open.otRecord?.clockInAt ? time(open.otRecord.clockInAt) : '—'} />
+                <Row label={t('home.clockOutTime')} value={open.otRecord?.clockOutAt ? time(open.otRecord.clockOutAt) : '—'} />
+              </dl>
+            ) : null}
             {open.type === 'late' && open.clockInAt ? <p className="text-sm text-muted">{t('home.clockInTime')}: {time(open.clockInAt)}</p> : null}
             <div className="rounded-lg bg-pale p-3 text-sm">
               <p className="mb-1 text-muted">{t('portal.reason')}</p>
@@ -182,6 +198,9 @@ export function Requests() {
             {mayDecide ? (
               <>
                 {changesRecord ? <Notice tone="info">{t('requests.approveChanges')}</Notice> : null}
+                {open.type === 'overtime' && open.startDate ? (
+                  <Notice tone="info">{t('requests.otConfirm', { hours: hm(otMinutes(open)), name: name(open), date: day(open.startDate) })}</Notice>
+                ) : null}
                 <Field label={t('requests.note')} hint={t('requests.noteHint')}>
                   <textarea rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} className="w-full rounded-lg border border-line bg-surface px-3 py-2" />
                 </Field>

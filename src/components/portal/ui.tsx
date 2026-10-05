@@ -89,12 +89,14 @@ export function Check({ label, checked, onChange, disabled }: { label: string; c
   );
 }
 
-export function Badge({ tone, children }: { tone: 'ok' | 'warn' | 'bad' | 'muted'; children: ReactNode }) {
+export function Badge({ tone, children }: { tone: 'ok' | 'warn' | 'bad' | 'muted' | 'info' | 'neutral'; children: ReactNode }) {
   const look = {
     ok: 'bg-success-pale text-success',
     warn: 'bg-warning-pale text-warning',
     bad: 'bg-danger-pale text-danger',
     muted: 'bg-pale text-muted',
+    info: 'bg-pale text-[#1f5fa8]',
+    neutral: 'bg-[#f0f4f8] text-muted',
   }[tone];
   return <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap ${look}`}>{children}</span>;
 }
@@ -121,11 +123,11 @@ export function DataTable<T>({
   return (
     <>
       <div className="hidden overflow-x-auto md:block">
-        <table className="w-full border-collapse text-sm">
+        <table className="w-full border-collapse text-sm [overflow-wrap:normal]">
           <thead>
             <tr className="border-b border-line text-left text-muted">
               {columns.map((c) => (
-                <th key={c.header} scope="col" className={`px-3 py-2 font-normal ${c.align === 'right' ? 'text-right' : ''}`}>
+                <th key={c.header} scope="col" className={`px-3 py-2 font-normal [overflow-wrap:normal] ${c.align === 'right' ? 'text-right' : ''}`}>
                   {c.header}
                 </th>
               ))}

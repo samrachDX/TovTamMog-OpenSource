@@ -8,7 +8,7 @@ import { useI18n } from './i18n-context';
 import { Button, Header, Notice } from './ui';
 
 export type RecordRef = { id: string; workDate: string; clockInAt: string | null; clockOutAt: string | null };
-export type RequestKind = 'leave' | 'absence' | 'late' | 'missed_clock_out' | 'correction';
+export type RequestKind = 'leave' | 'absence' | 'late' | 'missed_clock_out' | 'correction' | 'overtime';
 
 const INPUT = 'min-h-12 w-full rounded-xl border border-line bg-surface px-3';
 
@@ -19,6 +19,13 @@ type Picked = { key: string; name: string; blob: Blob; image: boolean };
 const MAX_FILES = 3;
 const MAX_TOTAL = 4_000_000;
 const ACCEPT = 'image/jpeg,image/png,image/webp,application/pdf';
+
+/** Overtime minutes between two wall-clock times; an end at or before the start is the next day. */
+export function overtimeMinutes(from: string, to: string): number {
+  const m = (v: string) => Number(v.slice(0, 2)) * 60 + Number(v.slice(3, 5));
+  const d = m(to) - m(from);
+  return d <= 0 ? d + 24 * 60 : d;
+}
 
 function nextDay(day: string): string {
   const d = new Date(`${day}T00:00:00Z`);
@@ -39,6 +46,8 @@ export function RequestForm({ kind, record, onDone }: { kind: RequestKind; recor
   const [part, setPart] = useState<'morning' | 'afternoon'>('morning');
   const [fromTime, setFromTime] = useState('08:00');
   const [toTime, setToTime] = useState('10:00');
+  const [otFrom, setOtFrom] = useState('17:00');
+  const [otTo, setOtTo] = useState('19:00');
   const [clockIn, setClockIn] = useState('');
   const [clockOut, setClockOut] = useState('');
   const [outNextDay, setOutNextDay] = useState(false);
@@ -116,7 +125,9 @@ export function RequestForm({ kind, record, onDone }: { kind: RequestKind; recor
   const timesOk = kind === 'correction' ? !!(clockIn || clockOut) : needsOut ? !!clockOut : true;
   const leaveOk = kind !== 'leave' || (unit === 'day' ? endDate >= startDate : unit === 'hours' ? toTime > fromTime : true);
   const typeOk = kind !== 'leave' || (!!typeId && (!needsFile || files.length > 0));
-  const valid = reason.trim().length >= 3 && timesOk && leaveOk && typeOk;
+  const otMinutes = overtimeMinutes(otFrom, otTo);
+  const otOk = kind !== 'overtime' || (otFrom !== otTo && otMinutes <= 12 * 60);
+  const valid = reason.trim().length >= 3 && timesOk && leaveOk && typeOk && otOk;
 
   const submit = async () => {
     setBusy(true);
@@ -130,6 +141,7 @@ export function RequestForm({ kind, record, onDone }: { kind: RequestKind; recor
         if (unit === 'hours') Object.assign(body, { startTime: fromTime, endTime: toTime });
       }
       if (kind === 'absence') Object.assign(body, { startDate });
+      if (kind === 'overtime') Object.assign(body, { startDate, startTime: otFrom, endTime: otTo });
       if (record) {
         body.attendanceRecordId = record.id;
         if (kind === 'correction' && clockIn) body.proposedClockIn = { date: record.workDate, time: clockIn };
@@ -237,6 +249,29 @@ export function RequestForm({ kind, record, onDone }: { kind: RequestKind; recor
         <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('portal.date')}</span>
           <input type="date" required max={today} className={INPUT} value={startDate} onChange={(e) => setStartDate(e.target.value)} />
         </label>
+      ) : null}
+
+      {kind === 'overtime' ? (
+        <>
+          <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('portal.date')}</span>
+            <input type="date" required className={INPUT} value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('requests.fromTime')}</span>
+              <input type="time" required className={INPUT} value={otFrom} onChange={(e) => setOtFrom(e.target.value)} />
+            </label>
+            <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('requests.toTime')}</span>
+              <input type="time" required className={INPUT} value={otTo} onChange={(e) => setOtTo(e.target.value)} />
+            </label>
+          </div>
+          <p className={`rounded-xl px-3 py-2 text-sm ${otOk ? 'bg-pale' : 'bg-danger-pale text-danger'}`}>
+            {otOk
+              ? t('requests.otTotal', { hours: num(Math.floor(otMinutes / 60)), minutes: num(String(otMinutes % 60).padStart(2, '0')) })
+              : t('errors.INVALID_TIME_RANGE')}
+            {otOk && otTo <= otFrom ? ` · ${t('requests.otNextDay')}` : ''}
+          </p>
+          <p className="text-sm text-muted">{t('requests.otNote')}</p>
+        </>
       ) : null}
 
       {kind === 'correction' ? (

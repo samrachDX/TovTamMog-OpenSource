@@ -282,12 +282,12 @@ describe('history and export', () => {
 
   it('exports CSV in local time, scoped, with formulas neutralised', async () => {
     await db.query(`update employees set name_en = '=HYPERLINK("http://x")' where id = $1`, [f.employeeId]);
-    const headers = Array.from({ length: 15 }, (_, i) => `h${i}`);
+    const headers = Array.from({ length: 19 }, (_, i) => `h${i}`);
     const csv = await exportAttendanceCsv(db, hr, { from: '2026-10-05', to: '2026-10-05' }, headers, (s) => s.toUpperCase());
     expect(csv.charCodeAt(0)).toBe(0xfeff);
     const lines = csv.slice(1).trim().split('\r\n');
     expect(lines).toHaveLength(2);
-    expect(lines[1]).toContain('2026-10-05,E001,សុខា,"\'=HYPERLINK(""http://x"")",សាខា BKK,Branch BKK,08:00,16:00,2026-10-05 08:20,2026-10-05 16:02,20,0,462,COMPLETED,1');
+    expect(lines[1]).toContain('2026-10-05,E001,សុខា,"\'=HYPERLINK(""http://x"")",សាខា BKK,Branch BKK,08:00,16:00,2026-10-05 08:20,2026-10-05 16:02,20,0,462,460,0,2,460,COMPLETED,1');
     await expect(exportAttendanceCsv(db, supervisor, { from: '2026-10-05', to: '2026-10-05' }, headers, String)).rejects.toThrow('FORBIDDEN');
     expect((await exportAttendanceCsv(db, otherManager, { from: '2026-10-01', to: '2026-10-31' }, headers, String)).slice(1).trim().split('\r\n')).toHaveLength(1);
   });
