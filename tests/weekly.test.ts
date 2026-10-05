@@ -2,7 +2,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Db } from '@/lib/db/types';
 import { loadActor, type Actor } from '@/lib/admin/actor';
 import { cancelAssignment, listAssignments, saveTemplate } from '@/lib/admin/schedule';
-import { generateWeeklyShifts, listWeeklySchedules, removeWeeklySchedule, setWeeklySchedule } from '@/lib/admin/weekly';
+import {
+  generateWeeklyShifts, listEmployeeWeekly, listWeeklySchedules, removeWeeklySchedule, setWeeklySchedule, updateWeeklySchedule,
+} from '@/lib/admin/weekly';
 import { publishEvent, saveEvent } from '@/lib/admin/events';
 import { runAttendanceMaintenance } from '@/lib/attendance/maintenance';
 import { clock } from '@/lib/attendance/engine';
@@ -181,5 +183,35 @@ describe('weekly schedule', () => {
     const w4 = await addEmployee(db, f.orgId, 'W4', [f.branchId]);
     await setWeeklySchedule(db, manager, { branchId: f.branchId, employeeIds: [w4], templateId: morning, weekdays: [1, 2, 3, 4, 5, 6, 7], startsOn: '2026-10-12', endsOn: '2026-10-14' });
     expect(await dates(w4)).toEqual(['2026-10-12', '2026-10-13', '2026-10-14']);
+  });
+
+  it('one person\'s schedule can be edited in place; days off stay off and other days are released', async () => {
+    const w5 = await addEmployee(db, f.orgId, 'W5', [f.branchId]);
+    await setWeeklySchedule(db, manager, { branchId: f.branchId, employeeIds: [w5], templateId: morning, weekdays: [1, 2, 3] });
+    await setWeeklySchedule(db, manager, { branchId: f.branchId, employeeIds: [w5], templateId: evening, weekdays: [6] });
+    const [mon] = (await shifts(w5, '2026-10-12', '2026-10-12'));
+    const dayOff = (await listAssignments(db, manager, { branchId: f.branchId, from: '2026-10-12', to: '2026-10-12' })).find((a) => a.employeeId === w5)!;
+    await cancelAssignment(db, manager, dayOff.id, { reason: 'ថ្ងៃឈប់' });
+    expect(mon.status).toBe('published');
+
+    const mine = await listEmployeeWeekly(db, manager, w5);
+    expect(mine.map((x) => x.weekdays)).toEqual([[1, 2, 3], [6]]);
+    const morningRow = mine.find((x) => x.templateEn === 'Morning')!;
+    const staff = await loadActor(db, { employeeId: w5, orgId: f.orgId });
+    await expect(updateWeeklySchedule(db, staff, morningRow.id, { templateId: evening, weekdays: [1] })).rejects.toThrow('FORBIDDEN');
+    await expect(updateWeeklySchedule(db, manager, morningRow.id, { templateId: evening, weekdays: [] })).rejects.toThrow('VALIDATION');
+
+    // Evenings on Mon, Wed and Sat: Tuesday goes, Saturday moves over from the other schedule.
+    const r = await updateWeeklySchedule(db, manager, morningRow.id, { templateId: evening, weekdays: [1, 3, 6] });
+    expect(r.shifts).toBeGreaterThan(0);
+    const after = await listEmployeeWeekly(db, manager, w5);
+    expect(after.map((x) => [x.id, x.templateEn, x.weekdays])).toEqual([[morningRow.id, 'Evening', [1, 3, 6]]]);
+    expect(await dates(w5)).not.toContain('2026-10-13');
+    const wed = await shifts(w5, '2026-10-14', '2026-10-14');
+    expect(wed.map((x) => [x.status, x.s])).toEqual([['published', new Date('2026-10-14T09:00:00Z')]]);
+    expect((await shifts(w5, '2026-10-17', '2026-10-17')).filter((x) => x.status === 'published')).toHaveLength(1);
+    // The Monday given off is still off.
+    expect((await shifts(w5, '2026-10-12', '2026-10-12')).map((x) => x.status)).toEqual(['cancelled']);
+    expect((await listNotifications(db, w5) as { kind: string }[]).filter((n) => n.kind === 'weekly_schedule')).toHaveLength(3);
   });
 });

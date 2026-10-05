@@ -628,6 +628,20 @@ export const km = {
   'portal.lt.deleteConfirm': 'លុប «{name}»? សកម្មភាពនេះមិនអាចត្រឡប់វិញបានទេ។',
   'portal.lt.inUse': 'កំពុងប្រើ ដូច្នេះអាចត្រឹមតែបិទ',
   'portal.lt.empty': 'មិនទាន់មានប្រភេទច្បាប់ទេ។ បន្ថែមមួយ ដើម្បីឱ្យបុគ្គលិកអាចស្នើសុំច្បាប់បាន។',
+
+  // ---- Per-person weekly schedules ----
+  'portal.weekly.edit': 'កែកាលវិភាគប្រចាំសប្តាហ៍',
+  'portal.weekly.editNote': 'ការផ្លាស់ប្តូរមានប្រសិទ្ធភាពចាប់ពីថ្ងៃនេះ៖ វេនខាងមុខត្រូវបង្កើតឡើងវិញឱ្យត្រូវគ្នា។ ថ្ងៃដែលបានឱ្យឈប់ នៅតែឈប់ ហើយវេនដែលបានធ្វើការរួច ត្រូវរក្សាទុក។',
+  'portal.weekly.updated': 'បានរក្សាទុកកាលវិភាគប្រចាំសប្តាហ៍សម្រាប់ {name}; វេនខាងមុខ {shifts}។',
+  'portal.weekly.personNone': 'មិនទាន់មានកាលវិភាគប្រចាំសប្តាហ៍ទេ។',
+  'portal.weekly.from': 'ចាប់ពី {date}',
+  'portal.weekly.end': 'បញ្ចប់',
+  'portal.weekly.ended': 'បានបញ្ចប់កាលវិភាគប្រចាំសប្តាហ៍។',
+  'portal.weekly.addDays': 'បន្ថែមថ្ងៃទៀត',
+  'portal.weekly.openPerson': 'កាលវិភាគប្រចាំសប្តាហ៍របស់ {name}',
+  'portal.emp.schedule.set': 'កំណត់កាលវិភាគប្រចាំសប្តាហ៍ឥឡូវនេះ',
+  'portal.emp.schedule.hint': 'វេនត្រូវបង្កើត និងផ្សព្វផ្សាយចាប់ពីថ្ងៃចាប់ផ្តើម នៅសាខាចម្បង។',
+  'portal.emp.schedule.failed': 'បានបន្ថែមបុគ្គលិករួចហើយ ប៉ុន្តែមិនទាន់កំណត់កាលវិភាគប្រចាំសប្តាហ៍បានទេ៖ {error}',
 } as const;
 
 export type MessageKey = keyof typeof km;

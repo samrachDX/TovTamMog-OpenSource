@@ -3,10 +3,11 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { api } from '@/lib/client/api';
-import type { MessageKey } from '@/lib/i18n';
+import { localDate, type MessageKey } from '@/lib/i18n';
 import { Avatar } from '@/components/Avatar';
 import { useI18n } from '@/components/mini-app/i18n-context';
 import { usePortal } from '../PortalShell';
+import { useTemplates, WeeklyFields, type WeeklyValue } from '../WeeklySchedule';
 import {
   Badge, Card, Check, DataTable, Dialog, Field, LoadState, Notice, PageHeader, Pager, Select, SmallButton,
   TextInput, useLoad, type Column,
@@ -125,7 +126,7 @@ export function EmployeeForm({
 }
 
 function FormDialog({ open, employee, onClose, onSaved }: Parameters<typeof EmployeeForm>[0]) {
-  const { t, locale, errorText } = useI18n();
+  const { t, locale, timeZone, errorText } = useI18n();
   const { me, name, can } = usePortal();
   const [form, setForm] = useState({
     employeeCode: employee?.employeeCode ?? '',
@@ -142,6 +143,20 @@ function FormDialog({ open, employee, onClose, onSaved }: Parameters<typeof Empl
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
   const permission = employee ? 'employee.update' : 'employee.create';
 
+  // A new employee can get their weekly schedule in the same step, at their primary branch.
+  const primary = form.primaryBranchId || form.branchIds[0] || '';
+  const canSchedule = !employee && !!primary && can('schedule.manage', primary);
+  const templates = useTemplates(canSchedule ? primary : '');
+  const [scheduleOn, setScheduleOn] = useState(true);
+  const [weekly, setWeekly] = useState<WeeklyValue>(() => ({
+    templateId: '', weekdays: [1, 2, 3, 4, 5, 6], startsOn: localDate(new Date(), timeZone), endsOn: '',
+  }));
+  const tplList = templates.data ?? [];
+  const templateId = tplList.some((x) => x.id === weekly.templateId) ? weekly.templateId : tplList[0]?.id ?? '';
+  const withSchedule = canSchedule && scheduleOn && !!templateId;
+  // Set when the person was saved but their schedule was not, so saving again cannot add them twice.
+  const [createdId, setCreatedId] = useState<string | null>(null);
+
   return (
     <Dialog open={open} title={t(employee ? 'portal.emp.edit' : 'portal.emp.add')} onClose={onClose}>
       <form
@@ -155,8 +170,25 @@ function FormDialog({ open, employee, onClose, onSaved }: Parameters<typeof Empl
             if (employee) {
               await api(`/api/portal/employees/${employee.id}`, { method: 'PATCH', body, locale });
               onSaved(employee.id);
+            } else if (createdId) {
+              onSaved(createdId);
             } else {
               const res = await api<{ id: string }>('/api/portal/employees', { body, locale });
+              if (withSchedule) {
+                try {
+                  await api('/api/portal/schedule/weekly', {
+                    body: {
+                      branchId: primary, employeeIds: [res.id], templateId, weekdays: weekly.weekdays,
+                      startsOn: weekly.startsOn, endsOn: weekly.endsOn || undefined,
+                    },
+                    locale,
+                  });
+                } catch (err) {
+                  setCreatedId(res.id);
+                  setError(t('portal.emp.schedule.failed', { error: errorText(err) }));
+                  return;
+                }
+              }
               onSaved(res.id);
             }
             onClose();
@@ -222,11 +254,31 @@ function FormDialog({ open, employee, onClose, onSaved }: Parameters<typeof Empl
             );
           })}
         </fieldset>
-        {error ? <Notice tone="danger">{error}</Notice> : null}
+        {canSchedule && !createdId ? (
+          <fieldset className="flex flex-col gap-3 rounded-lg border border-line px-3 pb-3">
+            <legend className="px-1 text-sm text-muted">{t('portal.weekly.title')}</legend>
+            <Check label={t('portal.emp.schedule.set')} checked={scheduleOn} onChange={setScheduleOn} />
+            {scheduleOn ? (
+              templates.data && !tplList.length ? (
+                <Notice tone="warning">{t('portal.weekly.needTemplate')}</Notice>
+              ) : tplList.length ? (
+                <>
+                  <WeeklyFields value={{ ...weekly, templateId }} onChange={setWeekly} templates={tplList} />
+                  <p className="text-xs text-muted">{t('portal.emp.schedule.hint')}</p>
+                </>
+              ) : <p className="text-sm text-muted">{t('common.loading')}</p>
+            ) : null}
+          </fieldset>
+        ) : null}
+        {error ? <Notice tone={createdId ? 'warning' : 'danger'}>{error}</Notice> : null}
         <div className="flex justify-end gap-2">
-          <SmallButton onClick={onClose}>{t('common.cancel')}</SmallButton>
-          <SmallButton type="submit" tone="primary" disabled={busy || form.branchIds.length === 0}>
-            {busy ? t('common.loading') : t('portal.save')}
+          {createdId ? null : <SmallButton onClick={onClose}>{t('common.cancel')}</SmallButton>}
+          <SmallButton
+            type="submit"
+            tone="primary"
+            disabled={busy || form.branchIds.length === 0 || (withSchedule && !weekly.weekdays.length)}
+          >
+            {busy ? t('common.loading') : createdId ? t('common.continue') : t('portal.save')}
           </SmallButton>
         </div>
       </form>

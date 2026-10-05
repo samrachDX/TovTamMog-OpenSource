@@ -10,6 +10,8 @@ import { usePortal } from '../PortalShell';
 import {
   Badge, Card, Dialog, Field, LoadState, Notice, PageHeader, ReasonDialog, Select, SmallButton, useLoad,
 } from '../ui';
+import { localDate } from '@/lib/i18n';
+import { PersonWeekly } from '../WeeklySchedule';
 import { EmployeeForm, STATUS_TONE, statusKey, type EmployeeItem } from './Employees';
 
 type Detail = EmployeeItem & {
@@ -26,7 +28,7 @@ type Pending =
 
 export function EmployeeDetail() {
   const { id } = useParams<{ id: string }>();
-  const { t, locale, dateTime, errorText } = useI18n();
+  const { t, locale, timeZone, dateTime, errorText } = useI18n();
   const { me, name, can, canOrg, branchName } = usePortal();
   const state = useLoad(() => api<Detail>(`/api/portal/employees/${id}`, { locale }), [id]);
   const [editing, setEditing] = useState(false);
@@ -189,6 +191,16 @@ export function EmployeeDetail() {
                   ) : null}
                 </div>
               </Card>
+
+              {inScope('schedule.view') ? (
+                <Card title={t('portal.weekly.title')}>
+                  <PersonWeekly
+                    person={e}
+                    branchIds={[...e.branches].sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary)).map((b) => b.id)}
+                    today={localDate(new Date(), timeZone)}
+                  />
+                </Card>
+              ) : null}
 
               <Card
                 title={t('portal.emp.roles')}

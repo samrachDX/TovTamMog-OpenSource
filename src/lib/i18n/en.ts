@@ -629,4 +629,18 @@ export const en: Record<MessageKey, string> = {
   'portal.lt.deleteConfirm': 'Delete “{name}”? This cannot be undone.',
   'portal.lt.inUse': 'In use, so it can only be disabled',
   'portal.lt.empty': 'No leave types yet. Add one so employees can request leave.',
+
+  // ---- Per-person weekly schedules ----
+  'portal.weekly.edit': 'Edit weekly schedule',
+  'portal.weekly.editNote': 'Changes apply from today: upcoming shifts are recreated to match. Days given off stay off, and shifts already worked are kept.',
+  'portal.weekly.updated': 'Weekly schedule saved for {name}; {shifts} upcoming shifts.',
+  'portal.weekly.personNone': 'No weekly schedule yet.',
+  'portal.weekly.from': 'From {date}',
+  'portal.weekly.end': 'End',
+  'portal.weekly.ended': 'Weekly schedule ended.',
+  'portal.weekly.addDays': 'Add more days',
+  'portal.weekly.openPerson': 'Weekly schedule for {name}',
+  'portal.emp.schedule.set': 'Set a weekly schedule now',
+  'portal.emp.schedule.hint': 'Shifts are created and published from the start date, at the primary branch.',
+  'portal.emp.schedule.failed': 'The employee was added, but the weekly schedule was not set: {error}',
 };

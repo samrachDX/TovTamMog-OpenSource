@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { api } from '@/lib/client/api';
-import { localDate, type MessageKey } from '@/lib/i18n';
+import { localDate } from '@/lib/i18n';
 import { useI18n } from '@/components/mini-app/i18n-context';
 import { usePortal } from '../PortalShell';
 import {
@@ -10,6 +10,7 @@ import {
   useLoad,
 } from '../ui';
 import type { EmployeeItem } from './Employees';
+import { PersonWeekly, WEEKDAYS, WeekdayChips, WeeklyScheduleDialog, type WeeklyRow, type WeeklyTarget } from '../WeeklySchedule';
 
 type Template = { id: string; nameKm: string; nameEn: string; startTime: string; endTime: string; active: boolean; overnight: boolean };
 type Assignment = {
@@ -22,15 +23,7 @@ type Assignment = {
 /** Draft: not yet visible to staff. Changed: a published one-off on a day the person's weekly schedule covers. */
 type ShiftKind = 'draft' | 'changed' | 'published';
 type Filter = 'all' | 'scheduled' | 'unscheduled' | 'draft' | 'changed';
-type Weekly = {
-  id: string; employeeId: string; employeeCode: string; nameKm: string; nameEn: string | null; templateKm: string; templateEn: string;
-  startTime: string; endTime: string; weekdays: number[]; startsOn: string; endsOn: string | null;
-};
-
-const WEEKDAYS: MessageKey[] = [
-  'portal.weekday.mon', 'portal.weekday.tue', 'portal.weekday.wed', 'portal.weekday.thu',
-  'portal.weekday.fri', 'portal.weekday.sat', 'portal.weekday.sun',
-];
+type Weekly = WeeklyRow;
 
 /** Calendar arithmetic on YYYY-MM-DD strings, independent of the browser's timezone. */
 function addDays(day: string, n: number): string {
@@ -99,6 +92,9 @@ export function Schedule() {
   );
   const [settingWeekly, setSettingWeekly] = useState(false);
   const [removeWeekly, setRemoveWeekly] = useState<Weekly | null>(null);
+  const [editWeekly, setEditWeekly] = useState<WeeklyTarget | null>(null);
+  type Person = { id: string; employeeCode: string; nameKm: string; nameEn: string | null };
+  const [person, setPerson] = useState<Person | null>(null);
   const [assigning, setAssigning] = useState(false);
   const [templating, setTemplating] = useState(false);
   const [cancel, setCancel] = useState<Assignment | null>(null);
@@ -204,17 +200,15 @@ export function Schedule() {
                   <span className="min-w-40 font-semibold">{name(w)} <span className="font-normal text-muted">· {w.employeeCode}</span></span>
                   <span className="flex flex-1 flex-wrap items-center gap-1.5">
                     <span className="tabular-nums">{name({ nameKm: w.templateKm, nameEn: w.templateEn })} {w.startTime}–{w.endTime}</span>
-                    {WEEKDAYS.map((k, i) => (
-                      <span
-                        key={k}
-                        className={`rounded px-1.5 py-0.5 text-xs ${w.weekdays.includes(i + 1) ? 'bg-primary font-semibold text-ink' : 'bg-pale text-muted line-through'}`}
-                      >
-                        {t(k)}
-                      </span>
-                    ))}
+                    <WeekdayChips weekdays={w.weekdays} />
                     {w.endsOn ? <span className="text-muted">{t('portal.weekly.until', { date: day(w.endsOn) })}</span> : null}
                   </span>
-                  {canManage ? <SmallButton tone="danger" onClick={() => setRemoveWeekly(w)}>{t('portal.remove')}</SmallButton> : null}
+                  {canManage ? (
+                    <span className="flex gap-2">
+                      <SmallButton onClick={() => setEditWeekly({ kind: 'edit', schedule: w })}>{t('portal.edit')}</SmallButton>
+                      <SmallButton tone="danger" onClick={() => setRemoveWeekly(w)}>{t('portal.remove')}</SmallButton>
+                    </span>
+                  ) : null}
                 </li>
               ))}
             </ul>
@@ -240,9 +234,13 @@ export function Schedule() {
           {(d) => {
             const byPerson = new Map<string, Assignment[]>();
             for (const a of d.items) byPerson.set(a.employeeId, [...(byPerson.get(a.employeeId) ?? []), a]);
-            const people = new Map<string, { id: string; name: string; code: string }>();
-            for (const e of staff.data?.items ?? []) people.set(e.id, { id: e.id, name: name(e), code: e.employeeCode });
-            for (const a of d.items) if (!people.has(a.employeeId)) people.set(a.employeeId, { id: a.employeeId, name: name(a), code: a.employeeCode });
+            const people = new Map<string, { id: string; name: string; code: string; who: Person }>();
+            for (const e of staff.data?.items ?? []) people.set(e.id, { id: e.id, name: name(e), code: e.employeeCode, who: e });
+            for (const a of d.items) {
+              if (!people.has(a.employeeId)) {
+                people.set(a.employeeId, { id: a.employeeId, name: name(a), code: a.employeeCode, who: { id: a.employeeId, employeeCode: a.employeeCode, nameKm: a.nameKm, nameEn: a.nameEn } });
+              }
+            }
             const q = search.trim().toLowerCase();
             const rows = [...people.values()].filter((p) => {
               if (q && !p.name.toLowerCase().includes(q) && !p.code.toLowerCase().includes(q)) return false;
@@ -303,8 +301,23 @@ export function Schedule() {
                         {rows.map((p) => (
                           <tr key={p.id} className="align-top">
                             <th scope="row" className="sticky left-0 z-[5] w-32 border-b border-line bg-surface px-2 py-2 text-left font-normal sm:w-48">
-                              <span className="block truncate font-semibold">{p.name}</span>
-                              <span className="block text-xs text-muted">{p.code}</span>
+                              {canManage ? (
+                                // The name opens this person's weekly schedule, to change it on its own.
+                                <button
+                                  type="button"
+                                  onClick={() => setPerson(p.who)}
+                                  aria-label={t('portal.weekly.openPerson', { name: p.name })}
+                                  className="block w-full rounded text-left hover:text-primary-strong hover:underline"
+                                >
+                                  <span className="block truncate font-semibold">{p.name}</span>
+                                  <span className="block text-xs text-muted">{p.code}</span>
+                                </button>
+                              ) : (
+                                <>
+                                  <span className="block truncate font-semibold">{p.name}</span>
+                                  <span className="block text-xs text-muted">{p.code}</span>
+                                </>
+                              )}
                             </th>
                             {days.map((dt) => (
                               <td key={dt} className={`border-b border-line px-1 py-2 ${dt === today ? 'bg-pale/50' : ''}`}>
@@ -361,6 +374,30 @@ export function Schedule() {
         templates={templates.data?.items.filter((x) => x.active) ?? []}
         staff={staff.data?.items ?? []}
         onClose={() => setSettingWeekly(false)}
+        onDone={(msg) => { setNotice(msg); weekly.reload(); shifts.reload(); }}
+      />
+      <Dialog
+        open={person !== null}
+        title={person ? t('portal.weekly.openPerson', { name: name(person) }) : ''}
+        onClose={() => setPerson(null)}
+      >
+        {person ? (
+          <>
+            <PersonWeekly
+              key={person.id}
+              person={person}
+              branchIds={[branchId]}
+              today={today}
+              onChanged={() => { weekly.reload(); shifts.reload(); }}
+            />
+            <div className="flex justify-end"><SmallButton onClick={() => setPerson(null)}>{t('common.close')}</SmallButton></div>
+          </>
+        ) : null}
+      </Dialog>
+      <WeeklyScheduleDialog
+        target={editWeekly}
+        today={today}
+        onClose={() => setEditWeekly(null)}
         onDone={(msg) => { setNotice(msg); weekly.reload(); shifts.reload(); }}
       />
       <ReasonDialog
