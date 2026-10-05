@@ -75,12 +75,17 @@ export function Home({ me, onClock }: { me: Me; onClock(action: 'clock_in' | 'cl
         <LanguageSwitch compact />
       </header>
 
-      <div className="relative rounded-2xl border border-line bg-[#fcfcfc] p-4 text-sm">
-        {/* Decorative animation in the corner; the wide rows leave room for it. Its frames have a
-            near-white (#FDFDFD) background; a slight brightness lift makes it pure white, which
-            multiply then blends into the #fcfcfc card without a visible box. */}
-        <LottieAnimation src={EMPLOYEE_CARD_ANIMATION} className="pointer-events-none absolute right-2 bottom-2 size-20 mix-blend-multiply brightness-[1.02]" />
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 [&>div.col-span-2]:pr-20">
+      <div className="relative isolate overflow-hidden rounded-2xl border border-line bg-[#fcfcfc] p-4 text-sm">
+        {/* Decorative animation standing on the card's bottom edge; the wide rows leave room for it.
+            Its frames have a near-white (#FDFDFD) background: a slight brightness lift makes that
+            pure white, which multiply turns into exactly the card's #fcfcfc, so no box shows.
+            The figure is cut off at the bottom of each frame, so that edge fades into the card
+            instead of ending in a hard line. */}
+        <LottieAnimation
+          src={EMPLOYEE_CARD_ANIMATION}
+          className="pointer-events-none absolute right-2 bottom-0 size-24 mix-blend-multiply brightness-[1.02] [mask-image:linear-gradient(to_bottom,#000_72%,transparent)]"
+        />
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 [&>div.col-span-2]:pr-24">
           <Field label={t('home.employeeCode')} value={`${profile.employeeCode} · ${pick(profile.category.km, profile.category.en)}`} />
           <Field label={t('home.branch')} value={branch ? pick(branch.nameKm, branch.nameEn) : t('common.none')} />
           <Field label={t('home.today')} value={longDate(now)} wide />
