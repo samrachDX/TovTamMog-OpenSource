@@ -202,22 +202,6 @@ export async function getDashboard(db: Db, actor: Actor, filter: Input = {}) {
   };
 }
 
-export async function listAudit(db: Db, actor: Actor, filter: Input) {
-  // The audit trail spans the organization, so it needs the organization-wide permission.
-  requireCan(actor, 'audit.view');
-  const { limit, offset } = paging(filter);
-  return db.query(
-    `select a.id, a.created_at as "createdAt", a.action, a.entity_type as "entityType", a.entity_id as "entityId",
-            a.reason, a.before, a.after, e.employee_code as "actorCode", e.name_km as "actorKm", e.name_en as "actorEn",
-            b.name_km as "branchKm", b.name_en as "branchEn"
-     from audit_log a
-     left join employees e on e.id = a.actor_employee_id
-     left join branches b on b.id = a.branch_id
-     where a.org_id = $1 order by a.created_at desc limit $2 offset $3`,
-    [actor.orgId, limit, offset],
-  );
-}
-
 const csvCell = (v: unknown): string => {
   let s = v === null || v === undefined ? '' : String(v);
   // Neutralise spreadsheet formulas in names and codes.

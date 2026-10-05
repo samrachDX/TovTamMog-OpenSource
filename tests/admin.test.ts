@@ -12,7 +12,8 @@ import {
 import {
   cancelAssignment, createAssignments, listAssignments, listTemplates, publishAssignments, saveTemplate,
 } from '@/lib/admin/schedule';
-import { getDashboard, listAttempts, listAttendance, listAudit } from '@/lib/admin/attendance';
+import { getDashboard, listAttempts, listAttendance } from '@/lib/admin/attendance';
+import { listAudit } from '@/lib/admin/audit';
 import { clock } from '@/lib/attendance/engine';
 import { authenticateLoginWidget, authenticateTelegram, enrollWithCode, getSession } from '@/lib/auth/session';
 import { signLoginWidget } from '@/lib/telegram/init-data';
@@ -394,8 +395,24 @@ describe('attendance review and dashboard', () => {
   });
 
   it('audit trail is org-wide only', async () => {
-    expect((await listAudit(db, admin, { limit: 5 })).length).toBe(5);
+    expect((await listAudit(db, admin, { limit: 5 })).items.length).toBe(5);
     await expect(listAudit(db, manager, {})).rejects.toThrow('FORBIDDEN');
     await expect(listAudit(db, hr, {})).rejects.toThrow('FORBIDDEN');
+  });
+
+  it('audit trail filters, names its subjects and logs exports', async () => {
+    const all = await listAudit(db, admin, { limit: 200 });
+    expect(all.total).toBeGreaterThan(5);
+    const employees = await listAudit(db, admin, { category: 'employee', limit: 200 });
+    expect(employees.items.length).toBeGreaterThan(0);
+    expect(employees.items.every((e) => String(e.action).startsWith('employee.'))).toBe(true);
+    const created = employees.items.find((e) => e.action === 'employee.create') as { subject: { km: string } | null } | undefined;
+    expect(created?.subject?.km).toBeTruthy();
+    expect((await listAudit(db, admin, { from: '2099-01-01', to: '2099-01-31' })).total).toBe(0);
+    await expect(listAudit(db, admin, { category: 'nope' })).rejects.toThrow('VALIDATION');
+    await expect(listAudit(db, admin, { from: '2026-01-01', to: '2025-01-01' })).rejects.toThrow('VALIDATION');
+    const exported = await listAudit(db, admin, { export: '1', category: 'employee' });
+    expect(exported.items.length).toBe(employees.total);
+    expect((await listAudit(db, admin, { category: 'report', limit: 1 })).items[0].action).toBe('audit.export');
   });
 });
