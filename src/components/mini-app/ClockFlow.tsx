@@ -17,11 +17,11 @@ type Step =
   | { name: 'locating'; branch: Named }
   | { name: 'submitting'; branch: Named }
   | { name: 'success'; branch: Named; at: string }
-  | { name: 'failed'; branch: Named | null; messages: string[]; reference?: string; canRetry: boolean };
+  | { name: 'failed'; branch: Named | null; messages: string[]; reference?: string; canRetry: boolean; locationSettings?: boolean };
 
 type Position = { latitude: number; longitude: number; accuracyM: number; ageMs: number };
 
-function getPosition(): Promise<Position> {
+function browserPosition(): Promise<Position> {
   return new Promise((resolve, reject) => {
     if (!('geolocation' in navigator)) return reject(new Error('unavailable'));
     navigator.geolocation.getCurrentPosition(
@@ -35,6 +35,37 @@ function getPosition(): Promise<Position> {
       (err) => reject(new Error(err.code === err.PERMISSION_DENIED ? 'denied' : 'unavailable')),
       { enableHighAccuracy: true, timeout: 20_000, maximumAge: 0 },
     );
+  });
+}
+
+/**
+ * Inside Telegram 8.0+, location goes through Telegram's own location manager: it asks once
+ * per bot and remembers the answer, instead of the in-app browser prompting on every clock-in.
+ * Rejects with 'denied_telegram' when the person refused there, so the screen can offer a way
+ * to change it in Telegram's settings.
+ */
+function getPosition(): Promise<Position> {
+  const tg = telegram();
+  const lm = tg?.isVersionAtLeast('8.0') ? tg.LocationManager : undefined;
+  if (!lm) return browserPosition();
+  return new Promise((resolve, reject) => {
+    const read = () => {
+      if (!lm.isLocationAvailable) return resolve(browserPosition());
+      lm.getLocation((data) => {
+        if (data) {
+          return resolve({
+            latitude: data.latitude,
+            longitude: data.longitude,
+            // Telegram may omit accuracy; the server then rejects it like any imprecise fix.
+            accuracyM: data.horizontal_accuracy ?? 10_000,
+            ageMs: 0,
+          });
+        }
+        reject(new Error(lm.isAccessRequested && !lm.isAccessGranted ? 'denied_telegram' : 'unavailable'));
+      });
+    };
+    if (lm.isInited) read();
+    else lm.init(read);
   });
 }
 
@@ -74,8 +105,11 @@ export function ClockFlow({ action, onDone }: { action: Action; onDone(changed: 
         try {
           location = await getPosition();
         } catch (err) {
-          const denied = err instanceof Error && err.message === 'denied';
-          return fail([t(denied ? 'attendance.locationDenied' : 'attendance.locationUnavailable')], branch);
+          const reason = err instanceof Error ? err.message : 'unavailable';
+          if (reason === 'denied_telegram') {
+            return setStep({ name: 'failed', branch, messages: [t('attendance.locationDeniedTelegram')], canRetry: true, locationSettings: true });
+          }
+          return fail([t(reason === 'denied' ? 'attendance.locationDenied' : 'attendance.locationUnavailable')], branch);
         }
       }
 
@@ -175,6 +209,11 @@ export function ClockFlow({ action, onDone }: { action: Action; onDone(changed: 
               }}
             >
               {t('common.retry')}
+            </Button>
+          ) : null}
+          {step.locationSettings ? (
+            <Button variant="secondary" onClick={() => telegram()?.LocationManager?.openSettings()}>
+              {t('attendance.openLocationSettings')}
             </Button>
           ) : null}
           <Button variant="secondary" onClick={() => onDone(false)}>

@@ -15,7 +15,13 @@ type Template = { id: string; nameKm: string; nameEn: string; startTime: string;
 type Assignment = {
   id: string; employeeId: string; employeeCode: string; nameKm: string; nameEn: string | null; workDate: string;
   startAt: string; endAt: string; status: 'draft' | 'published'; hasAttendance: boolean; fromWeekly: boolean;
+  /** HH:MM on the branch clock, matching the templates. */
+  startLocal: string; endLocal: string; overnight: boolean;
 };
+
+/** Draft: not yet visible to staff. Changed: a published one-off on a day the person's weekly schedule covers. */
+type ShiftKind = 'draft' | 'changed' | 'published';
+type Filter = 'all' | 'scheduled' | 'unscheduled' | 'draft' | 'changed';
 type Weekly = {
   id: string; employeeId: string; employeeCode: string; nameKm: string; nameEn: string | null; templateKm: string; templateEn: string;
   startTime: string; endTime: string; weekdays: number[]; startsOn: string; endsOn: string | null;
@@ -36,6 +42,30 @@ function mondayOf(day: string): string {
   const dow = new Date(`${day}T00:00:00Z`).getUTCDay(); // 0 = Sunday
   return addDays(day, dow === 0 ? -6 : 1 - dow);
 }
+/** ISO weekday, 1 = Monday … 7 = Sunday, as weekly schedules store it. */
+function isoWeekday(day: string): number {
+  const dow = new Date(`${day}T00:00:00Z`).getUTCDay();
+  return dow === 0 ? 7 : dow;
+}
+
+/** Every active employee of a branch, page by page, so branches above one page are not cut short. */
+async function allBranchStaff(branchId: string, locale: Parameters<typeof api>[1]['locale']): Promise<{ items: EmployeeItem[] }> {
+  const items: EmployeeItem[] = [];
+  for (let offset = 0; offset < 5000; offset += 200) {
+    const page = await api<{ items: EmployeeItem[]; total: number }>(
+      `/api/portal/employees?branchId=${branchId}&status=active&limit=200&offset=${offset}`, { locale },
+    );
+    items.push(...page.items);
+    if (items.length >= page.total || !page.items.length) break;
+  }
+  return { items };
+}
+
+const KIND_LOOK: Record<ShiftKind, string> = {
+  draft: 'border border-dashed border-muted bg-surface text-muted',
+  changed: 'border border-warning/40 bg-warning-pale text-warning',
+  published: 'border border-transparent bg-pale text-ink',
+};
 
 export function Schedule() {
   const { t, locale, timeZone, time, day, num } = useI18n();
@@ -57,11 +87,11 @@ export function Schedule() {
     [branchId, weekStart],
   );
   const staff = useLoad(
-    () => (branchId
-      ? api<{ items: EmployeeItem[] }>(`/api/portal/employees?branchId=${branchId}&status=active&limit=200`, { locale })
-      : Promise.resolve({ items: [] })),
+    () => (branchId ? allBranchStaff(branchId, locale) : Promise.resolve({ items: [] })),
     [branchId],
   );
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<Filter>('all');
 
   const weekly = useLoad(
     () => (branchId ? api<{ items: Weekly[] }>(`/api/portal/schedule/weekly?branchId=${branchId}`, { locale }) : Promise.resolve({ items: [] })),
@@ -93,26 +123,40 @@ export function Schedule() {
 
   if (!branches.length) return <Notice tone="info">{t('portal.empty')}</Notice>;
 
-  const chip = (a: Assignment) => (
-    <span
-      key={a.id}
-      className={`flex items-center justify-between gap-1 rounded-md px-2 py-1 text-xs ${
-        a.status === 'draft' ? 'border border-dashed border-muted text-muted' : 'bg-pale text-ink'
-      }`}
-    >
-      <span className="tabular-nums">{time(a.startAt)}–{time(a.endAt)}</span>
-      {canManage && !a.hasAttendance ? (
-        <button
-          type="button"
-          aria-label={t('portal.sched.cancelShift')}
-          className="pressable -mr-1 min-h-6 min-w-6 rounded text-muted hover:text-danger"
-          onClick={() => (a.status === 'published' ? setCancel(a) : void action({ type: 'cancel', id: a.id }))}
-        >
-          ×
-        </button>
-      ) : null}
-    </span>
-  );
+  // Which weekdays each person's weekly schedule covers on a given date.
+  const weeklyCovers = (employeeId: string, date: string) =>
+    (weekly.data?.items ?? []).some(
+      (w) => w.employeeId === employeeId && w.weekdays.includes(isoWeekday(date)) && w.startsOn <= date && (!w.endsOn || w.endsOn >= date),
+    );
+  const kindOf = (a: Assignment): ShiftKind =>
+    a.status === 'draft' ? 'draft' : !a.fromWeekly && weeklyCovers(a.employeeId, a.workDate) ? 'changed' : 'published';
+  const span = (a: Assignment) => `${num(a.startLocal)}–${num(a.endLocal)}${a.overnight ? ' +1' : ''}`;
+
+  const chip = (a: Assignment) => {
+    const kind = kindOf(a);
+    return (
+      <span
+        key={a.id}
+        title={`${t(`portal.sched.kind.${kind}`)}${a.fromWeekly ? ` · ${t('portal.weekly.title')}` : ''}`}
+        className={`flex items-center justify-between gap-1 rounded-md px-2 py-1 text-xs ${KIND_LOOK[kind]}`}
+      >
+        <span className="flex min-w-0 flex-col leading-tight">
+          <span className="tabular-nums whitespace-nowrap">{span(a)}</span>
+          {kind !== 'published' ? <span className="text-[11px] font-semibold">{t(`portal.sched.kind.${kind}`)}</span> : null}
+        </span>
+        {canManage && !a.hasAttendance ? (
+          <button
+            type="button"
+            aria-label={`${t('portal.sched.cancelShift')} · ${name(a)} · ${day(a.workDate)} · ${span(a)}`}
+            className="pressable -mr-1 min-h-6 min-w-6 rounded text-muted hover:text-danger"
+            onClick={() => (a.status === 'published' ? setCancel(a) : void action({ type: 'cancel', id: a.id }))}
+          >
+            ×
+          </button>
+        ) : null}
+      </span>
+    );
+  };
 
   return (
     <>
@@ -139,6 +183,11 @@ export function Schedule() {
           <SmallButton onClick={() => setWeekStart(mondayOf(today))}>{t('portal.sched.thisWeek')}</SmallButton>
           <SmallButton onClick={() => setWeekStart(addDays(weekStart, 7))}>{t('portal.next')}</SmallButton>
         </div>
+        <div className="w-44">
+          <Field label={t('portal.sched.goTo')}>
+            <TextInput type="date" value={weekStart} onChange={(e) => { if (e.target.value) setWeekStart(mondayOf(e.target.value)); }} />
+          </Field>
+        </div>
         <span className="pb-2 text-sm text-muted">{day(days[0])} – {day(days[6])}</span>
       </div>
 
@@ -149,7 +198,7 @@ export function Schedule() {
         <p className="mb-3 text-sm text-muted">{t('portal.weekly.note')}</p>
         <LoadState state={weekly}>
           {(d) => d.items.length ? (
-            <ul className="flex flex-col gap-2 text-sm">
+            <ul className="flex max-h-80 flex-col gap-2 overflow-y-auto text-sm">
               {d.items.map((w) => (
                 <li key={w.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-line pb-2 last:border-0 last:pb-0">
                   <span className="min-w-40 font-semibold">{name(w)} <span className="font-normal text-muted">· {w.employeeCode}</span></span>
@@ -189,61 +238,88 @@ export function Schedule() {
       >
         <LoadState state={shifts}>
           {(d) => {
-            const people = new Map<string, { id: string; label: string }>();
-            for (const e of staff.data?.items ?? []) people.set(e.id, { id: e.id, label: `${name(e)} · ${e.employeeCode}` });
-            for (const a of d.items) if (!people.has(a.employeeId)) people.set(a.employeeId, { id: a.employeeId, label: `${name(a)} · ${a.employeeCode}` });
-            const cell = (employeeId: string, date: string) => d.items.filter((a) => a.employeeId === employeeId && a.workDate === date);
-            if (!people.size) return <p className="py-6 text-center text-muted">{t('portal.empty')}</p>;
+            const byPerson = new Map<string, Assignment[]>();
+            for (const a of d.items) byPerson.set(a.employeeId, [...(byPerson.get(a.employeeId) ?? []), a]);
+            const people = new Map<string, { id: string; name: string; code: string }>();
+            for (const e of staff.data?.items ?? []) people.set(e.id, { id: e.id, name: name(e), code: e.employeeCode });
+            for (const a of d.items) if (!people.has(a.employeeId)) people.set(a.employeeId, { id: a.employeeId, name: name(a), code: a.employeeCode });
+            const q = search.trim().toLowerCase();
+            const rows = [...people.values()].filter((p) => {
+              if (q && !p.name.toLowerCase().includes(q) && !p.code.toLowerCase().includes(q)) return false;
+              const mine = byPerson.get(p.id) ?? [];
+              if (filter === 'scheduled') return mine.length > 0;
+              if (filter === 'unscheduled') return mine.length === 0;
+              if (filter === 'draft' || filter === 'changed') return mine.some((a) => kindOf(a) === filter);
+              return true;
+            });
+            const changed = d.items.filter((a) => kindOf(a) === 'changed').length;
+            const cell = (employeeId: string, date: string) => (byPerson.get(employeeId) ?? []).filter((a) => a.workDate === date);
             return (
               <>
-                {drafts > 0 ? <p className="mb-2 text-sm text-muted">{t('portal.sched.draftNote')}</p> : null}
-                <div className="hidden overflow-x-auto md:block">
-                  <table className="w-full border-collapse text-sm">
-                    <thead>
-                      <tr className="border-b border-line text-left text-muted">
-                        <th scope="col" className="px-2 py-2 font-normal">{t('portal.emp.name')}</th>
-                        {days.map((dt, i) => (
-                          <th key={dt} scope="col" className={`px-2 py-2 font-normal ${dt === today ? 'text-ink' : ''}`}>
-                            {t(WEEKDAYS[i])}<br /><span className="tabular-nums">{day(dt).slice(0, 5)}</span>
-                          </th>
+                <div className="mb-3 flex flex-wrap items-end gap-3">
+                  <div className="w-full sm:w-64">
+                    <Field label={t('portal.search')}>
+                      <TextInput type="search" placeholder={t('portal.picker.search')} value={search} onChange={(e) => setSearch(e.target.value)} />
+                    </Field>
+                  </div>
+                  <div className="w-full sm:w-52">
+                    <Field label={t('portal.sched.show')}>
+                      <Select value={filter} onChange={(e) => setFilter(e.target.value as Filter)}>
+                        {(['all', 'scheduled', 'unscheduled', 'draft', 'changed'] as const).map((f) => (
+                          <option key={f} value={f}>{t(`portal.sched.filter.${f}`)}</option>
                         ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {[...people.values()].map((p) => (
-                        <tr key={p.id} className="border-b border-line align-top last:border-0">
-                          <th scope="row" className="px-2 py-2 text-left font-normal">{p.label}</th>
-                          {days.map((dt) => (
-                            <td key={dt} className={`px-1 py-2 ${dt === today ? 'bg-pale/50' : ''}`}>
-                              <div className="flex min-w-24 flex-col gap-1">{cell(p.id, dt).map(chip)}</div>
-                            </td>
+                      </Select>
+                    </Field>
+                  </div>
+                  <ul className="flex flex-wrap items-center gap-2 pb-2 text-xs" aria-label={t('portal.sched.legend')}>
+                    {(['published', 'changed', 'draft'] as const).map((k) => (
+                      <li key={k} className={`rounded-md px-2 py-0.5 ${KIND_LOOK[k]}`}>{t(`portal.sched.kind.${k}`)}</li>
+                    ))}
+                  </ul>
+                </div>
+                {drafts > 0 ? <p className="mb-2 text-sm text-muted">{t('portal.sched.draftNote')}</p> : null}
+                <p className="mb-2 text-sm text-muted">{t('portal.sched.changedNote')}</p>
+                {!rows.length ? <p className="py-6 text-center text-muted">{t('portal.empty')}</p> : (
+                  // Its own scroll box, so the header row and the name column can stay pinned on every screen size.
+                  <div className="max-h-[calc(100dvh-13rem)] min-h-64 overflow-auto rounded-lg border border-line">
+                    <table className="w-full border-separate border-spacing-0 text-sm">
+                      <thead>
+                        <tr className="text-left text-muted">
+                          <th scope="col" className="sticky top-0 left-0 z-20 w-32 border-b border-line bg-surface px-2 py-2 font-normal sm:w-48">
+                            {t('portal.emp.name')}
+                          </th>
+                          {days.map((dt, i) => (
+                            <th
+                              key={dt}
+                              scope="col"
+                              className={`sticky top-0 z-10 min-w-24 border-b border-line px-2 py-2 font-normal ${dt === today ? 'bg-pale font-semibold text-ink' : 'bg-surface'}`}
+                            >
+                              {t(WEEKDAYS[i])}<br /><span className="tabular-nums">{day(dt).slice(0, 5)}</span>
+                            </th>
                           ))}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <ul className="flex flex-col gap-3 md:hidden">
-                  {days.map((dt, i) => {
-                    const list = d.items.filter((a) => a.workDate === dt);
-                    return (
-                      <li key={dt} className="rounded-lg border border-line p-3 text-sm">
-                        <div className="mb-2 font-semibold">{t(WEEKDAYS[i])} · {day(dt)}</div>
-                        {list.length ? (
-                          <ul className="flex flex-col gap-1.5">
-                            {list.map((a) => (
-                              <li key={a.id} className="grid grid-cols-[1fr_auto] items-center gap-2">
-                                <span className="min-w-0">{name(a)}</span>
-                                {chip(a)}
-                              </li>
+                      </thead>
+                      <tbody>
+                        {rows.map((p) => (
+                          <tr key={p.id} className="align-top">
+                            <th scope="row" className="sticky left-0 z-[5] w-32 border-b border-line bg-surface px-2 py-2 text-left font-normal sm:w-48">
+                              <span className="block truncate font-semibold">{p.name}</span>
+                              <span className="block text-xs text-muted">{p.code}</span>
+                            </th>
+                            {days.map((dt) => (
+                              <td key={dt} className={`border-b border-line px-1 py-2 ${dt === today ? 'bg-pale/50' : ''}`}>
+                                <div className="flex min-w-24 flex-col gap-1">{cell(p.id, dt).map(chip)}</div>
+                              </td>
                             ))}
-                          </ul>
-                        ) : <span className="text-muted">{t('portal.sched.noShifts')}</span>}
-                      </li>
-                    );
-                  })}
-                </ul>
-                <p className="mt-3 text-sm text-muted">{t('portal.sched.count', { count: num(d.items.length) })}</p>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                <p className="mt-3 text-sm text-muted">
+                  {t('portal.sched.summary', { shown: num(rows.length), people: num(people.size), count: num(d.items.length), drafts: num(drafts), changed: num(changed) })}
+                </p>
               </>
             );
           }}
@@ -421,15 +497,7 @@ function AssignDialog({
         </fieldset>
         <fieldset className="rounded-lg border border-line px-3 pb-1">
           <legend className="px-1 text-sm text-muted">{t('nav.employees')}</legend>
-          <div className="flex gap-2 py-1">
-            <SmallButton onClick={() => setEmployeeIds(staff.map((s) => s.id))}>{t('portal.selectAll')}</SmallButton>
-            <SmallButton onClick={() => setEmployeeIds([])}>{t('portal.selectNone')}</SmallButton>
-          </div>
-          <div className="grid max-h-56 gap-x-3 overflow-y-auto sm:grid-cols-2">
-            {staff.map((s) => (
-              <Check key={s.id} label={`${name(s)} · ${s.employeeCode}`} checked={employeeIds.includes(s.id)} onChange={(v) => setEmployeeIds((x) => toggle(x, s.id, v))} />
-            ))}
-          </div>
+          <StaffChecklist staff={staff} value={employeeIds} onChange={setEmployeeIds} />
         </fieldset>
         <Check label={t('portal.sched.publishNow')} checked={publish} onChange={setPublish} />
         {error ? <Notice tone="danger">{error}</Notice> : null}
@@ -497,7 +565,7 @@ function WeeklyDialog({
           </Field>
           <fieldset className="rounded-lg border border-line px-3 pb-1">
             <legend className="px-1 text-sm text-muted">{t('portal.weekly.workingDays')}</legend>
-            <div className="grid grid-cols-4 gap-x-3 sm:grid-cols-7">
+            <div className="flex flex-wrap gap-x-4 [&_span]:whitespace-nowrap">
               {WEEKDAYS.map((k, i) => (
                 <Check key={k} label={t(k)} checked={weekdays.includes(i + 1)} onChange={(v) => setWeekdays((x) => toggle(x, i + 1, v))} />
               ))}
@@ -505,15 +573,7 @@ function WeeklyDialog({
           </fieldset>
           <fieldset className="rounded-lg border border-line px-3 pb-1">
             <legend className="px-1 text-sm text-muted">{t('nav.employees')}</legend>
-            <div className="flex gap-2 py-1">
-              <SmallButton onClick={() => setEmployeeIds(staff.map((s) => s.id))}>{t('portal.selectAll')}</SmallButton>
-              <SmallButton onClick={() => setEmployeeIds([])}>{t('portal.selectNone')}</SmallButton>
-            </div>
-            <div className="grid max-h-56 gap-x-3 overflow-y-auto sm:grid-cols-2">
-              {staff.map((s) => (
-                <Check key={s.id} label={`${name(s)} · ${s.employeeCode}`} checked={employeeIds.includes(s.id)} onChange={(v) => setEmployeeIds((x) => toggle(x, s.id, v))} />
-              ))}
-            </div>
+            <StaffChecklist staff={staff} value={employeeIds} onChange={setEmployeeIds} />
           </fieldset>
           <div className="grid grid-cols-2 gap-3">
             <Field label={t('portal.weekly.startsOn')}><TextInput type="date" required value={startsOn} onChange={(e) => setStartsOn(e.target.value)} /></Field>
@@ -529,5 +589,40 @@ function WeeklyDialog({
         </form>
       )}
     </Dialog>
+  );
+}
+
+/** Pick people from a branch: filter by name or code, select all that match, and see how many are chosen. */
+function StaffChecklist({ staff, value, onChange }: { staff: EmployeeItem[]; value: string[]; onChange(ids: string[]): void }) {
+  const { t, num } = useI18n();
+  const { name } = usePortal();
+  const [q, setQ] = useState('');
+  const needle = q.trim().toLowerCase();
+  const shown = needle
+    ? staff.filter((s) => name(s).toLowerCase().includes(needle) || s.employeeCode.toLowerCase().includes(needle))
+    : staff;
+  const chosen = new Set(value);
+  return (
+    <div className="flex flex-col gap-2 py-1">
+      <TextInput type="search" placeholder={t('portal.picker.search')} value={q} onChange={(e) => setQ(e.target.value)} />
+      <div className="flex flex-wrap items-center gap-2">
+        <SmallButton onClick={() => onChange([...new Set([...value, ...shown.map((s) => s.id)])])}>
+          {needle ? t('portal.sched.selectShown', { count: num(shown.length) }) : t('portal.selectAll')}
+        </SmallButton>
+        <SmallButton onClick={() => onChange([])}>{t('portal.selectNone')}</SmallButton>
+        <span className="text-sm font-semibold">{t('portal.picker.selected', { count: num(value.length) })}</span>
+      </div>
+      <div className="grid max-h-56 gap-x-3 overflow-y-auto sm:grid-cols-2">
+        {shown.map((s) => (
+          <Check
+            key={s.id}
+            label={`${name(s)} · ${s.employeeCode}`}
+            checked={chosen.has(s.id)}
+            onChange={(v) => onChange(v ? [...value, s.id] : value.filter((x) => x !== s.id))}
+          />
+        ))}
+        {!shown.length ? <p className="py-2 text-sm text-muted">{t('portal.picker.noMatch')}</p> : null}
+      </div>
+    </div>
   );
 }

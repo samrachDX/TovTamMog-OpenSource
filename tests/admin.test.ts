@@ -277,6 +277,8 @@ describe('schedule', () => {
     // 08:00 Phnom Penh is 01:00 UTC.
     expect(list[0].startAt).toEqual(new Date('2026-10-12T01:00:00Z'));
     expect(list[0].endAt).toEqual(new Date('2026-10-12T09:00:00Z'));
+    // Shown on the branch clock, matching the template.
+    expect(list[0]).toMatchObject({ startLocal: '08:00', endLocal: '16:00', overnight: false });
 
     // Overlapping custom shift for w1 on the 12th is skipped; w2 on the 14th is fine.
     const again = await createAssignments(db, manager, {
@@ -292,6 +294,7 @@ describe('schedule', () => {
     expect(list[0]).toMatchObject({ workDate: '2026-10-15' });
     expect(list[0].startAt).toEqual(new Date('2026-10-15T15:00:00Z'));
     expect(list[0].endAt).toEqual(new Date('2026-10-15T23:00:00Z'));
+    expect(list[0]).toMatchObject({ startLocal: '22:00', endLocal: '06:00', overnight: true });
     // The morning after an overnight shift overlaps it.
     const clash = await createAssignments(db, manager, {
       branchId: f.branchId, startTime: '05:00', endTime: '13:00', employeeIds: [w2], dates: ['2026-10-16'],

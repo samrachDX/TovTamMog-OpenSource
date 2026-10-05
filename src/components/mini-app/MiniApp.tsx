@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ApiError, api, getToken, setToken } from '@/lib/client/api';
 import { telegram } from '@/lib/client/telegram';
 import type { Digits, Locale } from '@/lib/i18n';
@@ -300,7 +301,8 @@ function TabBar({ tab, unread, onChange }: { tab: Tab; unread: number; onChange(
     <>
       {/* Keeps page content clear of the fixed bar. */}
       <div aria-hidden="true" className="h-16 shrink-0" />
-      <nav
+      {/* Rendered into <body> so no animated or transformed ancestor can unpin it from the viewport. */}
+      {createPortal(<nav
         aria-label={t('portal.nav')}
         className="fixed inset-x-0 bottom-0 z-10 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur"
       >
@@ -332,7 +334,7 @@ function TabBar({ tab, unread, onChange }: { tab: Tab; unread: number; onChange(
             </li>
           ))}
         </ul>
-      </nav>
+      </nav>, document.body)}
     </>
   );
 }

@@ -82,6 +82,13 @@ export type Assignment = {
   templateId: string | null; hasAttendance: boolean;
   /** True when the shift came from a weekly schedule rather than being assigned by hand. */
   fromWeekly: boolean;
+  /**
+   * Start and end as HH:MM on the branch's clock, the same clock templates are written in, so
+   * the grid shows 08:00–16:00 for an 08:00–16:00 template whatever the viewer's own timezone.
+   */
+  startLocal: string; endLocal: string;
+  /** The shift ends on the calendar day after `workDate`. */
+  overnight: boolean;
 };
 
 export async function listAssignments(db: Db, actor: Actor, filter: Input): Promise<Assignment[]> {
@@ -96,8 +103,11 @@ export async function listAssignments(db: Db, actor: Actor, filter: Input): Prom
     `select sa.id, sa.employee_id as "employeeId", e.employee_code as "employeeCode", e.name_km as "nameKm",
             e.name_en as "nameEn", sa.work_date::text as "workDate", sa.start_at as "startAt", sa.end_at as "endAt",
             sa.status, sa.template_id as "templateId", (sa.pattern_id is not null) as "fromWeekly",
-            exists (select 1 from attendance_records r where r.shift_assignment_id = sa.id) as "hasAttendance"
-     from shift_assignments sa join employees e on e.id = sa.employee_id
+            exists (select 1 from attendance_records r where r.shift_assignment_id = sa.id) as "hasAttendance",
+            to_char(sa.start_at at time zone b.timezone, 'HH24:MI') as "startLocal",
+            to_char(sa.end_at at time zone b.timezone, 'HH24:MI') as "endLocal",
+            ((sa.end_at at time zone b.timezone)::date > sa.work_date) as overnight
+     from shift_assignments sa join employees e on e.id = sa.employee_id join branches b on b.id = sa.branch_id
      where sa.branch_id = $1 and sa.work_date between $2::date and $3::date and sa.status <> 'cancelled'
        and $3::date - $2::date <= 62
      order by sa.work_date, sa.start_at, e.employee_code`,

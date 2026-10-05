@@ -295,15 +295,18 @@ export async function rotateQr(db: Db, actor: Actor, id: string, input: Input): 
 /** Replaces the list of people who are told about activity at this branch (new requests). */
 export async function setBranchRecipients(db: Db, actor: Actor, id: string, input: Input): Promise<void> {
   requireCan(actor, 'branch.manage', id);
-  const employeeIds = uuidList(input, 'employeeIds', { max: 20 });
+  const employeeIds = uuidList(input, 'employeeIds', { max: 500 });
   await db.tx(async (tx) => {
     await load(tx, actor, id, true);
     const ok = await tx.query(`select 1 from employees where org_id = $1 and status = 'active' and id = any($2::uuid[])`, [actor.orgId, employeeIds]);
     if (ok.length !== employeeIds.length) throw new AppError('VALIDATION', { field: 'employeeIds' });
     const before = await tx.query<{ employee_id: string }>(`delete from branch_notification_recipients where branch_id = $1 returning employee_id`, [id]);
-    for (const e of employeeIds) {
-      await tx.query(`insert into branch_notification_recipients (branch_id, employee_id, created_by) values ($1, $2, $3)`, [id, e, actor.employeeId]);
-    }
+    // One statement for the whole list, so saving hundreds of people is a single round trip.
+    await tx.query(
+      `insert into branch_notification_recipients (branch_id, employee_id, created_by)
+       select $1, e, $3 from unnest($2::uuid[]) as e`,
+      [id, employeeIds, actor.employeeId],
+    );
     await recordAudit(tx, {
       orgId: actor.orgId, actorEmployeeId: actor.employeeId, action: 'branch.recipients.update', entityType: 'branch',
       entityId: id, branchId: id, before: before.map((b) => b.employee_id), after: employeeIds, ip: actor.ip, at: actor.now,

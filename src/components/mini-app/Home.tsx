@@ -3,6 +3,7 @@
 import { localHour, type MessageKey } from '@/lib/i18n';
 import { useI18n } from './i18n-context';
 import { Avatar } from '@/components/Avatar';
+import { LottieAnimation } from '@/components/LottieAnimation';
 import { FeedSection, type Feed } from './Feed';
 import { Button, LanguageSwitch, Notice } from './ui';
 
@@ -31,6 +32,9 @@ export type Me = {
     } | null;
   };
 };
+
+/** Self-hosted copy of the animation (lottie.host/0f5188f5-0321-4808-b0f4-19e766d88d66/HQxQT1FFEu.lottie). */
+const EMPLOYEE_CARD_ANIMATION = '/animations/employee-card.lottie';
 
 const STATE_TONE: Record<Me['overview']['state'], string> = {
   not_clocked_in: 'bg-pale text-ink',
@@ -71,16 +75,20 @@ export function Home({ me, onClock }: { me: Me; onClock(action: 'clock_in' | 'cl
         <LanguageSwitch />
       </header>
 
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-2xl border border-line p-4 text-sm">
-        <Field label={t('home.employeeCode')} value={`${profile.employeeCode} · ${pick(profile.category.km, profile.category.en)}`} />
-        <Field label={t('home.branch')} value={branch ? pick(branch.nameKm, branch.nameEn) : t('common.none')} />
-        <Field label={t('home.today')} value={longDate(now)} wide />
-        <Field
-          label={t('home.shift')}
-          value={shift ? `${time(shift.startAt)} – ${time(shift.endAt)}` : t('home.noShift')}
-          wide
-        />
-      </dl>
+      <div className="relative rounded-2xl border border-line p-4 text-sm">
+        {/* Decorative animation in the corner; the wide rows leave room for it. */}
+        <LottieAnimation src={EMPLOYEE_CARD_ANIMATION} className="pointer-events-none absolute right-2 bottom-2 size-20" />
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 [&>div.col-span-2]:pr-20">
+          <Field label={t('home.employeeCode')} value={`${profile.employeeCode} · ${pick(profile.category.km, profile.category.en)}`} />
+          <Field label={t('home.branch')} value={branch ? pick(branch.nameKm, branch.nameEn) : t('common.none')} />
+          <Field label={t('home.today')} value={longDate(now)} wide />
+          <Field
+            label={t('home.shift')}
+            value={shift ? `${time(shift.startAt)} – ${time(shift.endAt)}` : t('home.noShift')}
+            wide
+          />
+        </dl>
+      </div>
 
       <section aria-label={t('home.attendanceStatus')} className="flex flex-col gap-3 rounded-2xl border border-line p-4">
         <div className="flex items-center justify-between gap-3">

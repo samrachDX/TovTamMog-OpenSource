@@ -51,10 +51,11 @@ export function PinPad({
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // Title, dots and keypad stay together as one block; spacing and key height follow the
+  // Title, dots and keypad stay together as one block, centred in the space under the top bar
+  // with no gap opening up between the dots and the keys. Spacing and key height follow the
   // viewport height so the whole pad fits on a short phone without scrolling.
   return (
-    <div className="flex flex-col gap-[clamp(0.75rem,2.5dvh,1.25rem)]">
+    <div className="mx-auto my-auto flex w-full max-w-sm flex-col gap-[clamp(0.75rem,2.5dvh,1.25rem)]">
       <Header title={title} body={body} />
       <div
         role="status"
@@ -71,7 +72,7 @@ export function PinPad({
         ))}
       </div>
       {error ? <Notice tone="danger">{error}</Notice> : null}
-      <div className="mx-auto grid w-full max-w-xs grid-cols-3 gap-[clamp(0.5rem,1.5dvh,0.75rem)]">
+      <div className="grid w-full grid-cols-3 gap-[clamp(0.5rem,1.5dvh,0.75rem)]">
         {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((d) => (
           <Key key={d} onClick={() => press(d)} disabled={busy}>
             {num(d)}

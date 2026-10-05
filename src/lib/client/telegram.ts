@@ -9,6 +9,20 @@ export type TelegramWebApp = {
   closeScanQrPopup(): void;
   onEvent(event: string, handler: () => void): void;
   offEvent(event: string, handler: () => void): void;
+  /**
+   * Bot API 8.0+. Telegram asks the person once per bot and remembers the answer, which they
+   * can change later in the bot's settings; the browser geolocation API may ask on every use
+   * inside Telegram's in-app browser.
+   */
+  LocationManager?: {
+    isInited: boolean;
+    isLocationAvailable: boolean;
+    isAccessRequested: boolean;
+    isAccessGranted: boolean;
+    init(callback?: () => void): void;
+    getLocation(callback: (data: { latitude: number; longitude: number; horizontal_accuracy: number | null } | null) => void): void;
+    openSettings(): void;
+  };
   HapticFeedback?: {
     notificationOccurred(type: 'success' | 'error' | 'warning'): void;
     impactOccurred(style: 'light' | 'medium' | 'heavy'): void;

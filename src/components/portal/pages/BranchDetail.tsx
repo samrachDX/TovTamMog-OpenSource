@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@/lib/client/api';
 import { qrPayload } from '@/lib/attendance/qr';
 import { useI18n } from '@/components/mini-app/i18n-context';
+import { EmployeePicker } from '../EmployeePicker';
 import { usePortal } from '../PortalShell';
 import {
   Badge, Card, Check, Field, LoadState, Notice, PageHeader, ReasonDialog, Select, SmallButton, TextInput, useLoad,
@@ -269,33 +270,20 @@ function SecurityCard({ b, reload }: CardProps) {
 
 function RecipientsCard({ b, reload }: CardProps) {
   const { t, locale } = useI18n();
-  const { name } = usePortal();
   const s = useSave(reload);
   const [ids, setIds] = useState(b.recipients.map((r) => r.id));
-  const staff = useLoad(
-    () => api<{ items: { id: string; employeeCode: string; nameKm: string; nameEn: string | null }[] }>(
-      `/api/portal/employees?branchId=${b.id}&status=active&limit=200`, { locale },
-    ),
-    [b.id],
-  );
-  // People already chosen stay listed even if they are no longer assigned to the branch.
-  const people = [...b.recipients, ...(staff.data?.items ?? []).filter((e) => !b.recipients.some((r) => r.id === e.id))];
   return (
     <Card title={t('portal.branch.recipients')}>
-      <p className="mb-2 text-sm text-muted">{t('portal.branch.recipientsNote')}</p>
+      <p className="mb-3 text-sm text-muted">{t('portal.branch.recipientsNote')}</p>
       <form onSubmit={(e) => { e.preventDefault(); void s.save(() => api(`/api/portal/branches/${b.id}/actions`, { body: { type: 'recipients', employeeIds: ids }, locale })); }}>
-        <div className="grid gap-x-3 sm:grid-cols-2">
-          {people.map((p) => (
-            <Check
-              key={p.id}
-              label={`${name(p)} · ${p.employeeCode}`}
-              checked={ids.includes(p.id)}
-              disabled={!b.canManage}
-              onChange={(v) => setIds((x) => (v ? [...x, p.id] : x.filter((i) => i !== p.id)))}
-            />
-          ))}
-        </div>
-        {!people.length ? <p className="text-sm text-muted">{t('portal.empty')}</p> : null}
+        <EmployeePicker
+          label={t('portal.branch.recipientsPick')}
+          value={ids}
+          onChange={setIds}
+          initial={b.recipients}
+          suggestBranchId={b.id}
+          disabled={!b.canManage}
+        />
         {b.canManage ? <Footer s={s} /> : null}
       </form>
     </Card>
