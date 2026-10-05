@@ -26,7 +26,7 @@ type Phase =
   | { name: 'pin_required' }
   | { name: 'ready'; me: Me; tab: Tab }
   | { name: 'request'; me: Me; back: Tab; kind: RequestKind; record?: RecordRef }
-  | { name: 'clocking'; me: Me; action: 'clock_in' | 'clock_out' }
+  | { name: 'clocking'; me: Me; action: 'clock_in' | 'clock_out'; forgot?: boolean }
   | { name: 'error'; message: string };
 
 type Tab = 'home' | 'history' | 'requests' | 'inbox';
@@ -251,7 +251,11 @@ function Flow() {
       return (
         <Screen>
           {error ? <Notice tone="danger">{error}</Notice> : null}
-          {tab === 'home' ? <Home me={me} onClock={(action) => setPhase({ name: 'clocking', me, action })} /> : null}
+          {tab === 'home' ? <Home
+              me={me}
+              onClock={(action, forgot) => setPhase({ name: 'clocking', me, action, forgot })}
+              onRequest={(kind, record) => setPhase({ name: 'request', me, back: 'home', kind, record })}
+            /> : null}
           {tab === 'history' ? <History onRequest={(kind, record) => setPhase({ name: 'request', me, back: 'history', kind, record })} /> : null}
           {tab === 'requests' ? <Requests onNew={(kind) => setPhase({ name: 'request', me, back: 'requests', kind })} /> : null}
           {tab === 'inbox' ? (
@@ -282,6 +286,7 @@ function Flow() {
       return (
         <ClockFlow
           action={phase.action}
+          forgot={phase.forgot}
           onDone={(changed) => {
             // Show the previous data immediately, then replace it with what the server has.
             setPhase({ name: 'ready', me: phase.me, tab: 'home' });

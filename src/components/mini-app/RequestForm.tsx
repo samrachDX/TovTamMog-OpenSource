@@ -122,7 +122,9 @@ export function RequestForm({ kind, record, onDone }: { kind: RequestKind; recor
   };
 
   const needsOut = kind === 'missed_clock_out';
-  const timesOk = kind === 'correction' ? !!(clockIn || clockOut) : needsOut ? !!clockOut : true;
+  // Still clocked in: only the clock-in can be fixed now; clocking out works as usual.
+  const openShift = kind === 'correction' && !!record && !record.clockOutAt;
+  const timesOk = kind === 'correction' ? !!(clockIn || (clockOut && !openShift)) : needsOut ? !!clockOut : true;
   const leaveOk = kind !== 'leave' || (unit === 'day' ? endDate >= startDate : unit === 'hours' ? toTime > fromTime : true);
   const typeOk = kind !== 'leave' || (!!typeId && (!needsFile || files.length > 0));
   const otMinutes = overtimeMinutes(otFrom, otTo);
@@ -145,7 +147,7 @@ export function RequestForm({ kind, record, onDone }: { kind: RequestKind; recor
       if (record) {
         body.attendanceRecordId = record.id;
         if (kind === 'correction' && clockIn) body.proposedClockIn = { date: record.workDate, time: clockIn };
-        if ((kind === 'correction' || needsOut) && clockOut) {
+        if ((kind === 'correction' || needsOut) && clockOut && !openShift) {
           body.proposedClockOut = { date: outNextDay ? nextDay(record.workDate) : record.workDate, time: clockOut };
         }
       }
@@ -279,7 +281,8 @@ export function RequestForm({ kind, record, onDone }: { kind: RequestKind; recor
           <input type="time" className={INPUT} value={clockIn} onChange={(e) => setClockIn(e.target.value)} />
         </label>
       ) : null}
-      {kind === 'correction' || needsOut ? (
+      {openShift ? <p className="rounded-xl bg-pale px-3 py-2 text-sm">{t('requests.openShiftNote')}</p> : null}
+      {(kind === 'correction' && !openShift) || needsOut ? (
         <>
           <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('requests.correctOut')}</span>
             <input type="time" required={needsOut} className={INPUT} value={clockOut} onChange={(e) => setClockOut(e.target.value)} />

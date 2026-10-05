@@ -132,15 +132,53 @@ describe('rejection and cancellation restore the record', () => {
     await expect(cancelMyRequest(db, { employeeId: hr.employeeId }, b.id)).rejects.toThrow('NOT_FOUND');
   });
 
-  it('an open shift cannot be "corrected"; it must be clocked out', async () => {
+  it('while still clocked in, only the clock-in can be corrected and the shift stays open', async () => {
     await addShift(db, f, day(9), day(9, 9));
-    const cin = await tap(f.employeeId, 'clock_in', day(9));
+    const cin = await tap(f.employeeId, 'clock_in', day(9, 1, 25)); // scanned 25 minutes late
     const id = cin.ok ? cin.record.id : '';
-    await expect(createRequest(db, me(day(9, 2)), {
-      type: 'correction', attendanceRecordId: id, reason: 'change it', proposedClockIn: { date: '2026-10-09', time: '07:00' },
-    })).rejects.toThrow('RECORD_NOT_CORRECTABLE');
+    expect((await record(id)).late_minutes).toBe(25);
+    const base = { type: 'correction', attendanceRecordId: id, reason: 'មកដល់ម៉ោង ៨ តែស្កេនយឺត' };
+    await expect(createRequest(db, me(day(9, 2)), { ...base, proposedClockOut: { date: '2026-10-09', time: '16:00' } })).rejects.toThrow('RECORD_NOT_CORRECTABLE');
+    await expect(createRequest(db, me(day(9, 2)), { ...base, proposedClockIn: { date: '2026-10-09', time: '10:00' } })).rejects.toThrow('INVALID_CORRECTION'); // in the future
+    await expect(createRequest(db, me(day(9, 2)), { ...base, proposedClockIn: { date: '2026-10-09', time: '08:25' } })).rejects.toThrow('INVALID_CORRECTION'); // unchanged
+    await expect(createRequest(db, me(day(9, 2)), { type: 'missed_clock_out', attendanceRecordId: id, reason: 'x x x', proposedClockOut: { date: '2026-10-09', time: '16:00' } })).rejects.toThrow('RECORD_NOT_CORRECTABLE');
+    const { id: requestId } = await createRequest(db, me(day(9, 2)), { ...base, proposedClockIn: { date: '2026-10-09', time: '08:00' } });
+    // The record is not locked, so clocking out still works later.
+    expect((await record(id)).status).toBe('clocked_in');
+    await expect(createRequest(db, me(day(9, 2)), { ...base, proposedClockIn: { date: '2026-10-09', time: '08:05' } })).rejects.toThrow('REQUEST_ALREADY_OPEN');
     await expect(adjustRecord(db, hr, id, { reason: 'fix it now', clockOut: { date: '2026-10-09', time: '16:00' } })).rejects.toThrow('RECORD_NOT_CORRECTABLE');
+
+    await decideRequest(db, manager, requestId, { decision: 'approved', note: 'ok' });
+    expect(await record(id)).toMatchObject({ status: 'clocked_in', clock_in_at: day(9, 1), late_minutes: 0, clock_out_at: null });
+    const h = await getRecordHistory(db, manager, id) as unknown as { adjustments: { original: Record<string, unknown>; updated: Record<string, unknown> }[] };
+    expect(h.adjustments[0].original).toMatchObject({ status: 'clocked_in', lateMinutes: 25 });
+    expect(h.adjustments[0].updated).toMatchObject({ status: 'clocked_in', lateMinutes: 0 });
     await tap(f.employeeId, 'clock_out', day(9, 9));
+    expect(await record(id)).toMatchObject({ status: 'completed', worked_minutes: 480 });
+  });
+
+  it('a clock-in correction asked during the shift can be approved after clocking out', async () => {
+    await addShift(db, f, day(10), day(10, 9));
+    const cin = await tap(f.employeeId, 'clock_in', day(10, 1, 40));
+    const id = cin.ok ? cin.record.id : '';
+    const { id: requestId } = await createRequest(db, me(day(10, 2)), {
+      type: 'correction', attendanceRecordId: id, reason: 'ទូរស័ព្ទអស់ថ្ម', proposedClockIn: { date: '2026-10-10', time: '07:58' },
+    });
+    await tap(f.employeeId, 'clock_out', day(10, 9, 5));
+    await decideRequest(db, manager, requestId, { decision: 'approved' });
+    expect(await record(id)).toMatchObject({ status: 'completed', clock_in_at: day(10, 0, 58), clock_out_at: day(10, 9, 5), late_minutes: 0, worked_minutes: 487 });
+  });
+
+  it('a rejected clock-in correction leaves the open record untouched', async () => {
+    await addShift(db, f, day(11), day(11, 9));
+    const cin = await tap(f.employeeId, 'clock_in', day(11, 1, 30));
+    const id = cin.ok ? cin.record.id : '';
+    const { id: requestId } = await createRequest(db, me(day(11, 2)), {
+      type: 'correction', attendanceRecordId: id, reason: 'arrived earlier', proposedClockIn: { date: '2026-10-11', time: '08:00' },
+    });
+    await decideRequest(db, manager, requestId, { decision: 'rejected', note: 'camera shows 08:30' });
+    expect(await record(id)).toMatchObject({ status: 'clocked_in', late_minutes: 30 });
+    await tap(f.employeeId, 'clock_out', day(11, 9));
   });
 });
 
@@ -275,7 +313,7 @@ describe('half-day and hourly leave', () => {
 describe('history and export', () => {
   it('filters the employee history', async () => {
     const all = await listMyAttendance(db, f.employeeId, { from: '2026-10-01', to: '2026-10-31' }) as { workDate: string; status: string }[];
-    expect(all.map((r) => r.workDate)).toEqual(['2026-10-24', '2026-10-23', '2026-10-22', '2026-10-21', '2026-10-14', '2026-10-09', '2026-10-07', '2026-10-05']);
+    expect(all.map((r) => r.workDate)).toEqual(['2026-10-24', '2026-10-23', '2026-10-22', '2026-10-21', '2026-10-14', '2026-10-11', '2026-10-10', '2026-10-09', '2026-10-07', '2026-10-05']);
     expect((await listMyAttendance(db, f.employeeId, { from: '2026-10-01', to: '2026-10-31', status: 'absent' }) as unknown[]).length).toBe(2);
     await expect(listMyAttendance(db, f.employeeId, { from: '2026-01-01', to: '2026-12-31' })).rejects.toThrow('DATE_RANGE_INVALID');
   });

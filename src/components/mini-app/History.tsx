@@ -78,6 +78,7 @@ export function History({ onRequest }: { onRequest(kind: RequestKind, record: Re
           const action: { kind: RequestKind; label: MessageKey } | null =
             r.status === 'missed_clock_out' ? { kind: 'missed_clock_out', label: 'history.fixMissed' }
               : r.status === 'completed' ? { kind: 'correction', label: 'history.requestCorrection' }
+                : r.status === 'clocked_in' ? { kind: 'correction', label: 'home.fixClockIn' }
                 : null;
           return (
             <li key={r.id} className="rounded-xl border border-line p-3 text-sm">

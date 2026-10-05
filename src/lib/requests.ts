@@ -194,9 +194,16 @@ export async function createRequest(
 
       if (type === 'late') {
         if (rec.late_minutes <= 0) throw new AppError('RECORD_NOT_CORRECTABLE');
+      } else if (rec.status === 'clocked_in') {
+        // Still on shift: only the clock-in can be corrected; the clock-out is made by clocking out.
+        // The record stays open so clocking out keeps working while the request waits.
+        if (type !== 'correction' || input.proposedClockOut) throw new AppError('RECORD_NOT_CORRECTABLE');
+        proposedIn = await toInstant(tx, localTime(input, 'proposedClockIn'), rec.timezone);
+        if (!proposedIn) throw new AppError('VALIDATION', { field: 'proposedClockIn' });
+        if (rec.clock_in_at && proposedIn.getTime() === rec.clock_in_at.getTime()) throw new AppError('INVALID_CORRECTION');
+        checkTimes(rec, proposedIn, null, now);
       } else {
-        // An open shift is fixed by clocking out, not by a correction.
-        if (rec.status === 'clocked_in' || rec.status === 'pending_correction') throw new AppError('RECORD_NOT_CORRECTABLE');
+        if (rec.status === 'pending_correction') throw new AppError('RECORD_NOT_CORRECTABLE');
         if (type === 'missed_clock_out' && rec.status !== 'missed_clock_out') throw new AppError('RECORD_NOT_CORRECTABLE');
         proposedIn = type === 'correction' ? await toInstant(tx, localTime(input, 'proposedClockIn'), rec.timezone) : null;
         proposedOut = await toInstant(tx, localTime(input, 'proposedClockOut'), rec.timezone);
@@ -344,6 +351,34 @@ export async function listMyAttendance(db: Db, employeeId: string, filter: Input
 }
 
 // ---- adjustments ---------------------------------------------------------------
+
+/**
+ * Moves the clock-in of a record that is still open. Lateness is worked out again from the
+ * new time; the record stays clocked in, and the old values go to attendance_adjustments.
+ */
+async function applyOpenClockIn(
+  db: Db,
+  rec: RecordRow,
+  clockIn: Date,
+  meta: { requestId: string | null; proposedBy: string; approvedBy: string; reason: string; now: Date },
+): Promise<void> {
+  checkTimes(rec, clockIn, null, meta.now);
+  const expected = rec.shift_start && rec.shift_end
+    ? await expectedHours(db, { employeeId: rec.employee_id, workDate: rec.work_date, shiftStart: rec.shift_start, shiftEnd: rec.shift_end, timezone: rec.timezone })
+    : null;
+  const late = expected ? lateMinutes(clockIn, expected.start, rec.late_grace_minutes) : 0;
+  const original = { status: rec.status, clockInAt: rec.clock_in_at, lateMinutes: rec.late_minutes };
+  const updated = { status: rec.status, clockInAt: clockIn, lateMinutes: late };
+  await db.query(
+    `update attendance_records set clock_in_at = $2, late_minutes = $3, updated_at = $4 where id = $1 and status = 'clocked_in'`,
+    [rec.id, clockIn, late, meta.now],
+  );
+  await db.query(
+    `insert into attendance_adjustments (org_id, record_id, request_id, proposed_by, approved_by, reason, original, updated, created_at)
+     values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9)`,
+    [rec.org_id, rec.id, meta.requestId, meta.proposedBy, meta.approvedBy, meta.reason, JSON.stringify(original), JSON.stringify(updated), meta.now],
+  );
+}
 
 /**
  * Changes the times on a record. The previous values are written to
@@ -550,7 +585,11 @@ export async function decideRequest(db: Db, actor: Actor, id: string, input: Inp
       const rec = await lockRecord(tx, req.attendance_record_id!);
       if (!rec) throw new AppError('NOT_FOUND');
       requireCan(actor, 'attendance.approve', rec.branch_id);
-      if (decision === 'approved') {
+      if (decision === 'approved' && rec.status === 'clocked_in') {
+        await applyOpenClockIn(tx, rec, req.proposed_clock_in_at!, {
+          requestId: id, proposedBy: req.employee_id, approvedBy: actor.employeeId, reason: req.reason, now,
+        });
+      } else if (decision === 'approved') {
         await applyAdjustment(tx, { ...rec, status: req.previous_record_status ?? rec.status }, {
           clockIn: req.proposed_clock_in_at, clockOut: req.proposed_clock_out_at,
         }, { requestId: id, proposedBy: req.employee_id, approvedBy: actor.employeeId, reason: req.reason, now });

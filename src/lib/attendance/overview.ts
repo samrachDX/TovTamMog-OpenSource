@@ -10,6 +10,8 @@ export type TodayOverview = {
   record: AttendanceRecord | null;
   shift: ShiftSummary | null;
   nextAction: 'clock_in' | 'clock_out' | null;
+  /** A correction for this record is waiting for a decision. */
+  correctionPending: boolean;
 };
 
 /**
@@ -52,13 +54,19 @@ export async function getTodayOverview(
   const forOtherShift = record && shift && record.status !== 'clocked_in' && record.shiftAssignmentId !== shift.id;
   if (!record || forOtherShift) {
     const canStart = shift ? shift.endAt.getTime() > now.getTime() : true;
-    return { state: 'not_clocked_in', record: null, shift, nextAction: canStart ? 'clock_in' : null };
+    return { state: 'not_clocked_in', record: null, shift, nextAction: canStart ? 'clock_in' : null, correctionPending: false };
   }
+  const pending = await db.query<{ open: boolean }>(
+    `select exists (select 1 from employee_requests where attendance_record_id = $1 and status = 'pending'
+       and type in ('correction', 'missed_clock_out')) as open`,
+    [record.id],
+  );
   return {
     state: record.status,
     record,
     shift,
     // Without a schedule the engine decides whether another clock-in is allowed.
     nextAction: record.status === 'clocked_in' ? 'clock_out' : record.status === 'completed' && !shift ? 'clock_in' : null,
+    correctionPending: pending[0]?.open ?? false,
   };
 }

@@ -5,6 +5,7 @@ import { useI18n } from './i18n-context';
 import { Avatar } from '@/components/Avatar';
 import { LottieAnimation } from '@/components/LottieAnimation';
 import { FeedSection, type Feed } from './Feed';
+import type { RecordRef, RequestKind } from './RequestForm';
 import { Button, LanguageSwitch, Notice } from './ui';
 
 export type Me = {
@@ -24,12 +25,15 @@ export type Me = {
     nextAction: 'clock_in' | 'clock_out' | null;
     shift: { branchId: string; startAt: string; endAt: string } | null;
     record: {
+      id: string;
+      workDate: string;
       branchId: string;
       clockInAt: string | null;
       clockOutAt: string | null;
       lateMinutes: number;
       earlyLeaveMinutes: number;
     } | null;
+    correctionPending: boolean;
   };
 };
 
@@ -46,7 +50,9 @@ const STATE_TONE: Record<Me['overview']['state'], string> = {
   under_review: 'bg-warning-pale text-warning',
 };
 
-export function Home({ me, onClock }: { me: Me; onClock(action: 'clock_in' | 'clock_out'): void }) {
+export function Home({ me, onClock, onRequest }: {
+  me: Me; onClock(action: 'clock_in' | 'clock_out', forgot?: boolean): void; onRequest(kind: RequestKind, record: RecordRef): void;
+}) {
   const { t, locale, timeZone, time, longDate } = useI18n();
   const { profile, overview } = me;
   const km = locale === 'km-KH';
@@ -115,6 +121,16 @@ export function Home({ me, onClock }: { me: Me; onClock(action: 'clock_in' | 'cl
           <Notice tone="warning">{t('home.earlyBy', { minutes: record.earlyLeaveMinutes })}</Notice>
         ) : null}
         {overview.state === 'missed_clock_out' ? <Notice tone="warning">{t('errors.MISSED_CLOCK_OUT')}</Notice> : null}
+        {record && overview.correctionPending ? <Notice tone="info">{t('home.correctionPending')}</Notice> : null}
+        {record && overview.state === 'missed_clock_out' && !overview.correctionPending ? (
+          <button
+            type="button"
+            onClick={() => onRequest('missed_clock_out', record)}
+            className="pressable min-h-11 rounded-xl border border-line px-3 text-sm font-semibold hover:bg-pale"
+          >
+            {t('history.fixMissed')}
+          </button>
+        ) : null}
       </section>
 
       <FeedSection feed={me.feed} />
@@ -125,6 +141,13 @@ export function Home({ me, onClock }: { me: Me; onClock(action: 'clock_in' | 'cl
             {t(overview.nextAction === 'clock_in' ? 'attendance.clockIn' : 'attendance.clockOut')}
           </Button>
           <p className="text-center text-sm text-muted">{t('attendance.scanHint')}</p>
+          <button
+            type="button"
+            className="pressable min-h-11 text-sm font-semibold text-primary-strong underline"
+            onClick={() => onClock(overview.nextAction!, true)}
+          >
+            {t(overview.nextAction === 'clock_in' ? 'attendance.forgot.in' : 'attendance.forgot.out')}
+          </button>
         </div>
       ) : null}
     </>

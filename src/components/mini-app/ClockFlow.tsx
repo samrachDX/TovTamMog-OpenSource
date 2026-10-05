@@ -16,8 +16,10 @@ type Step =
   | { name: 'resolving' }
   | { name: 'locating'; branch: Named }
   | { name: 'submitting'; branch: Named }
-  | { name: 'success'; branch: Named; at: string }
+  | { name: 'success'; branch: Named; at: string; record: ClockedRecord }
   | { name: 'failed'; branch: Named | null; messages: string[]; reference?: string; canRetry: boolean; locationSettings?: boolean };
+
+type ClockedRecord = { id: string; workDate: string; clockInAt: string; clockOutAt: string | null };
 
 type Position = { latitude: number; longitude: number; accuracyM: number; ageMs: number };
 
@@ -74,7 +76,7 @@ function getPosition(): Promise<Position> {
  * has accepted the request. One idempotency key covers the whole attempt, so a retry
  * after a dropped connection cannot create a second record.
  */
-export function ClockFlow({ action, onDone }: { action: Action; onDone(changed: boolean): void }) {
+export function ClockFlow({ action, forgot = false, onDone }: { action: Action; forgot?: boolean; onDone(changed: boolean): void }) {
   const { t, locale, time, errorText } = useI18n();
   const [step, setStep] = useState<Step>({ name: 'scanning' });
   const started = useRef(false);
@@ -115,7 +117,7 @@ export function ClockFlow({ action, onDone }: { action: Action; onDone(changed: 
 
       setStep({ name: 'submitting', branch });
       try {
-        const res = await api<{ record: { clockInAt: string; clockOutAt: string | null } }>('/api/attendance/clock', {
+        const res = await api<{ record: ClockedRecord }>('/api/attendance/clock', {
           body: { action, qr, idempotencyKey: key, location },
           locale,
         });
@@ -124,6 +126,7 @@ export function ClockFlow({ action, onDone }: { action: Action; onDone(changed: 
           name: 'success',
           branch,
           at: action === 'clock_in' ? res.record.clockInAt : (res.record.clockOutAt ?? res.record.clockInAt),
+          record: res.record,
         });
       } catch (err) {
         telegram()?.HapticFeedback?.notificationOccurred('error');
@@ -175,6 +178,7 @@ export function ClockFlow({ action, onDone }: { action: Action; onDone(changed: 
           <p className="text-4xl font-semibold tabular-nums">{time(step.at)}</p>
           <p className="text-muted">{t('attendance.confirmBranch', { branch: name(step.branch) })}</p>
         </div>
+        <ForgotTime action={action} record={step.record} at={step.at} openAtStart={forgot} />
         <Button onClick={() => onDone(true)}>{t('common.close')}</Button>
       </Screen>
     );
@@ -242,5 +246,73 @@ export function ClockFlow({ action, onDone }: { action: Action; onDone(changed: 
       <Spinner label={label} />
       {step.name === 'locating' ? <Notice tone="info">{t('attendance.locationWhy')}</Notice> : null}
     </Screen>
+  );
+}
+
+function nextDay(day: string): string {
+  const d = new Date(`${day}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * For someone who forgot to scan on time: the scan just made stays as recorded, and the
+ * time they really arrived or left goes to their manager as a correction request.
+ */
+function ForgotTime({ action, record, at, openAtStart }: { action: Action; record: ClockedRecord; at: string; openAtStart: boolean }) {
+  const { t, locale, timeZone, errorText } = useI18n();
+  const [open, setOpen] = useState(openAtStart);
+  const [actual, setActual] = useState('');
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const hm = (iso: string) =>
+    new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone }).format(new Date(iso));
+  const scanned = hm(at);
+  const clockedIn = hm(record.clockInAt);
+  // The real time has to be before the scan; a clock-out also has to be after the clock-in.
+  const ok = !!actual && reason.trim().length >= 3 && actual < scanned && (action === 'clock_in' || actual > clockedIn || scanned < clockedIn);
+
+  const send = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const body: Record<string, unknown> = { type: 'correction', attendanceRecordId: record.id, reason: reason.trim() };
+      if (action === 'clock_in') body.proposedClockIn = { date: record.workDate, time: actual };
+      else body.proposedClockOut = { date: actual < clockedIn ? nextDay(record.workDate) : record.workDate, time: actual };
+      await api('/api/requests', { body, locale });
+      setSent(true);
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (sent) return <Notice tone="success">{t('attendance.forgot.sent')}</Notice>;
+  if (!open) {
+    return (
+      <button type="button" className="pressable min-h-11 text-sm font-semibold text-primary-strong underline" onClick={() => setOpen(true)}>
+        {t(action === 'clock_in' ? 'attendance.forgot.in' : 'attendance.forgot.out')}
+      </button>
+    );
+  }
+  return (
+    <section className="flex w-full flex-col gap-3 rounded-2xl border border-line p-4 text-left">
+      <h2 className="font-semibold">{t(action === 'clock_in' ? 'requests.correctIn' : 'requests.correctOut')}</h2>
+      <p className="text-sm text-muted">{t('attendance.forgot.note', { time: scanned })}</p>
+      <label className="flex flex-col gap-1 text-sm">
+        <span className="text-muted">{t(action === 'clock_in' ? 'attendance.forgot.actualIn' : 'attendance.forgot.actualOut')}</span>
+        <input type="time" className="min-h-12 w-full rounded-xl border border-line bg-surface px-3" value={actual} max={scanned} onChange={(e) => setActual(e.target.value)} />
+      </label>
+      {actual && actual >= scanned ? <p className="text-sm text-danger">{t('attendance.forgot.tooLate', { time: scanned })}</p> : null}
+      <label className="flex flex-col gap-1 text-sm">
+        <span className="text-muted">{t('portal.reason')}</span>
+        <textarea rows={3} maxLength={1000} className="w-full rounded-xl border border-line bg-surface px-3 py-2" value={reason} onChange={(e) => setReason(e.target.value)} />
+      </label>
+      {error ? <Notice tone="danger">{error}</Notice> : null}
+      <Button disabled={!ok || busy} onClick={() => void send()}>{busy ? t('common.loading') : t('attendance.forgot.send')}</Button>
+    </section>
   );
 }
