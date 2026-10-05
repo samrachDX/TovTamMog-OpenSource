@@ -378,6 +378,16 @@ describe('attendance review and dashboard', () => {
     // Before the shift has ended it is not yet an absence.
     const morning = await loadActor(db, hr, { now: new Date('2026-10-12T03:00:00Z') });
     expect((await getDashboard(db, morning, { branchId: f.branchId })).totals.absent).toBe(0);
+    // The week and month cover every day in them; "clocked in now" stays live.
+    const week = await getDashboard(db, evening, { branchId: f.branchId, period: 'week' });
+    expect(week).toMatchObject({ period: 'week', from: '2026-10-12', to: '2026-10-18' });
+    expect(week.totals.scheduled).toBeGreaterThanOrEqual(d.totals.scheduled);
+    expect(week.totals.absent).toBeGreaterThanOrEqual(1);
+    expect(week.totals.clockedIn).toBe(d.totals.clockedIn);
+    const month = await getDashboard(db, evening, { branchId: f.branchId, period: 'month', date: '2026-10-20' });
+    expect(month).toMatchObject({ from: '2026-10-01', to: '2026-10-31' });
+    expect(month.totals.scheduled).toBeGreaterThanOrEqual(week.totals.scheduled);
+    await expect(getDashboard(db, evening, { period: 'year' })).rejects.toThrow('VALIDATION');
     // A branch manager only gets their branch.
     const m = await getDashboard(db, await loadActor(db, manager, { now: evening.now }), {});
     expect(m.branches.map((b) => b.branchId)).toEqual([f.branchId]);

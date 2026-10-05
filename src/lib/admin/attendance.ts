@@ -99,31 +99,56 @@ async function orgTimezone(db: Db, actor: Actor): Promise<string> {
 
 export type DashboardRow = {
   branchId: string; nameKm: string; nameEn: string;
-  activeEmployees: number; scheduled: number; clockedIn: number; late: number; absent: number; missedClockOut: number;
+  activeEmployees: number; scheduled: number; clockedIn: number; late: number; earlyLeave: number;
+  absent: number; missedClockOut: number; onLeave: number;
 };
 
+export const DASHBOARD_PERIODS = ['day', 'week', 'month'] as const;
+export type DashboardPeriod = (typeof DASHBOARD_PERIODS)[number];
+
+/** The day, the Monday-to-Sunday week, or the calendar month that contains `day`. */
+export function periodRange(period: DashboardPeriod, day: string): { from: string; to: string } {
+  const d = new Date(`${day}T00:00:00Z`);
+  const iso = (x: Date) => x.toISOString().slice(0, 10);
+  if (period === 'day') return { from: day, to: day };
+  if (period === 'week') {
+    const back = (d.getUTCDay() + 6) % 7;
+    const from = new Date(d.getTime() - back * 86_400_000);
+    return { from: iso(from), to: iso(new Date(from.getTime() + 6 * 86_400_000)) };
+  }
+  return {
+    from: iso(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1))),
+    to: iso(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0))),
+  };
+}
+
 /**
- * Figures for one local day, per branch and in total, all computed from stored records.
- * "Absent" counts published shifts that have ended with no attendance record, plus
- * records explicitly marked absent.
+ * Figures for a local day, week or month, per branch and in total, all computed from stored
+ * records. "Scheduled" counts published shifts in the period; "clocked in now" is always the
+ * live count. "Absent" counts published shifts that have ended with no attendance record
+ * (leave and days off excluded), plus records explicitly marked absent.
  */
 export async function getDashboard(db: Db, actor: Actor, filter: Input = {}) {
   const now = actor.now ?? new Date();
   const branches = branchFilter(actor, 'attendance.view', optUuid(filter, 'branchId'));
   const tz = await orgTimezone(db, actor);
+  const period: DashboardPeriod = filter.period ? oneOf(filter, 'period', DASHBOARD_PERIODS) : 'day';
   const day = filter.date ? date(filter, 'date') : localDate(now, tz);
+  const { from, to } = periodRange(period, day);
   const rows = await db.query<DashboardRow>(
     `select b.id as "branchId", b.name_km as "nameKm", b.name_en as "nameEn",
        (select count(*)::int from employee_branches eb join employees e on e.id = eb.employee_id
          where eb.branch_id = b.id and e.status = 'active') as "activeEmployees",
-       (select count(distinct sa.employee_id)::int from shift_assignments sa
-         where sa.branch_id = b.id and sa.work_date = $3::date and sa.status = 'published') as scheduled,
+       (select count(*)::int from shift_assignments sa
+         where sa.branch_id = b.id and sa.work_date between $3::date and $4::date and sa.status = 'published') as scheduled,
        (select count(*)::int from attendance_records r
          where r.branch_id = b.id and r.status = 'clocked_in') as "clockedIn",
        (select count(*)::int from attendance_records r
-         where r.branch_id = b.id and r.work_date = $3::date and r.late_minutes > 0) as late,
+         where r.branch_id = b.id and r.work_date between $3::date and $4::date and r.late_minutes > 0) as late,
+       (select count(*)::int from attendance_records r
+         where r.branch_id = b.id and r.work_date between $3::date and $4::date and r.early_leave_minutes > 0) as "earlyLeave",
        (select count(*)::int from shift_assignments sa
-         where sa.branch_id = b.id and sa.work_date = $3::date and sa.status = 'published' and sa.end_at <= $4::timestamptz
+         where sa.branch_id = b.id and sa.work_date between $3::date and $4::date and sa.status = 'published' and sa.end_at <= $5::timestamptz
            and not exists (select 1 from attendance_records r where r.shift_assignment_id = sa.id)
            and not exists (select 1 from employee_requests q where q.employee_id = sa.employee_id and q.type = 'leave' and q.leave_unit = 'day'
                              and q.status = 'approved' and sa.work_date between q.start_date and q.end_date)
@@ -132,30 +157,42 @@ export async function getDashboard(db: Db, actor: Actor, filter: Input = {}) {
                              and (not exists (select 1 from event_branches t where t.event_id = ev.id)
                                   or exists (select 1 from event_branches t where t.event_id = ev.id and t.branch_id = b.id))))
        + (select count(*)::int from attendance_records r
-         where r.branch_id = b.id and r.work_date = $3::date and r.status = 'absent') as absent,
+         where r.branch_id = b.id and r.work_date between $3::date and $4::date and r.status = 'absent') as absent,
        (select count(*)::int from attendance_records r
-         where r.branch_id = b.id and r.work_date = $3::date and r.status = 'missed_clock_out') as "missedClockOut"
+         where r.branch_id = b.id and r.work_date between $3::date and $4::date and r.status = 'missed_clock_out') as "missedClockOut",
+       (select count(distinct q.employee_id)::int from employee_requests q join employee_branches eb on eb.employee_id = q.employee_id
+         where eb.branch_id = b.id and q.type = 'leave' and q.status = 'approved'
+           and q.start_date <= $4::date and coalesce(q.end_date, q.start_date) >= $3::date) as "onLeave"
      from branches b
      where b.org_id = $1 and b.status = 'active' and ($2::uuid[] is null or b.id = any($2::uuid[]))
      order by b.name_en`,
-    [actor.orgId, branches, day, now],
+    [actor.orgId, branches, from, to, now],
   );
   // People assigned to several branches are counted once in the total.
-  const [{ n }] = await db.query<{ n: number }>(
-    `select count(distinct e.id)::int as n from employees e join employee_branches eb on eb.employee_id = e.id
-     join branches b on b.id = eb.branch_id
-     where e.org_id = $1 and e.status = 'active' and b.status = 'active' and ($2::uuid[] is null or b.id = any($2::uuid[]))`,
-    [actor.orgId, branches],
+  const [{ n, leave }] = await db.query<{ n: number; leave: number }>(
+    `select
+       (select count(distinct e.id)::int from employees e join employee_branches eb on eb.employee_id = e.id
+         join branches b on b.id = eb.branch_id
+         where e.org_id = $1 and e.status = 'active' and b.status = 'active' and ($2::uuid[] is null or b.id = any($2::uuid[]))) as n,
+       (select count(distinct q.employee_id)::int from employee_requests q join employee_branches eb on eb.employee_id = q.employee_id
+         join branches b on b.id = eb.branch_id
+         where q.org_id = $1 and b.status = 'active' and ($2::uuid[] is null or b.id = any($2::uuid[]))
+           and q.type = 'leave' and q.status = 'approved'
+           and q.start_date <= $4::date and coalesce(q.end_date, q.start_date) >= $3::date) as leave`,
+    [actor.orgId, branches, from, to],
   );
   const sum = (k: keyof DashboardRow) => rows.reduce((acc, r) => acc + (r[k] as number), 0);
   return {
+    period,
     date: day,
+    from,
+    to,
     generatedAt: now,
     pendingRequests: await countPendingRequests(db, actor),
     upcomingEvents: await upcomingEvents(db, actor, day),
     totals: {
       activeEmployees: n, scheduled: sum('scheduled'), clockedIn: sum('clockedIn'), late: sum('late'),
-      absent: sum('absent'), missedClockOut: sum('missedClockOut'),
+      earlyLeave: sum('earlyLeave'), absent: sum('absent'), missedClockOut: sum('missedClockOut'), onLeave: leave,
     },
     branches: rows,
   };
