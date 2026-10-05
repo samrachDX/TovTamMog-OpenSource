@@ -657,4 +657,12 @@ export const en: Record<MessageKey, string> = {
   'portal.sched.templateTimesNote': 'Weekly schedules that use this template will move to the new times from today. One-off shifts and shifts already worked keep their times. The people affected are told.',
   'portal.sched.templateActiveHint': 'Disabled templates cannot be chosen for new shifts. Weekly schedules already using it carry on.',
   'portal.sched.templateMoved': 'Template saved. Upcoming shifts moved to the new times for {people} weekly schedules.',
+
+  // ---- Portal sidebar ----
+  'portal.navGroup.overview': 'Overview',
+  'portal.navGroup.people': 'People and time',
+  'portal.navGroup.organization': 'Organization',
+  'portal.sidebar.collapse': 'Collapse sidebar',
+  'portal.sidebar.expand': 'Expand sidebar',
+  'portal.sidebar.open': 'Open menu',
 };

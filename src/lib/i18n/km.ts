@@ -656,6 +656,14 @@ export const km = {
   'portal.sched.templateTimesNote': 'កាលវិភាគប្រចាំសប្តាហ៍ដែលប្រើគំរូនេះ នឹងប្តូរទៅម៉ោងថ្មីចាប់ពីថ្ងៃនេះ។ វេនតែម្តង និងវេនដែលបានធ្វើការរួច រក្សាម៉ោងដដែល។ អ្នកពាក់ព័ន្ធនឹងទទួលបានការជូនដំណឹង។',
   'portal.sched.templateActiveHint': 'គំរូដែលបានបិទ មិនអាចជ្រើសសម្រាប់វេនថ្មីបានទេ។ កាលវិភាគប្រចាំសប្តាហ៍ដែលកំពុងប្រើ នៅតែបន្ត។',
   'portal.sched.templateMoved': 'បានរក្សាទុកគំរូ។ វេនខាងមុខបានប្តូរទៅម៉ោងថ្មីសម្រាប់កាលវិភាគប្រចាំសប្តាហ៍ {people}។',
+
+  // ---- Portal sidebar ----
+  'portal.navGroup.overview': 'ទិដ្ឋភាពទូទៅ',
+  'portal.navGroup.people': 'បុគ្គលិក និងម៉ោងធ្វើការ',
+  'portal.navGroup.organization': 'អង្គភាព',
+  'portal.sidebar.collapse': 'បង្រួមរបារចំហៀង',
+  'portal.sidebar.expand': 'ពង្រីករបារចំហៀង',
+  'portal.sidebar.open': 'បើកម៉ឺនុយ',
 } as const;
 
 export type MessageKey = keyof typeof km;
