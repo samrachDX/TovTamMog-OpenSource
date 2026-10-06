@@ -17,11 +17,12 @@ type Item = {
   reviewerKm: string | null; reviewerEn: string | null;
   leaveTypeKm: string | null; leaveTypeEn: string | null; attachments: AttachmentRef[];
   swap: { mine: SwapShift; theirs: SwapShift; with: { employeeCode: string; nameKm: string; nameEn: string | null } } | null;
+  workInsteadOn: string | null;
 };
 type SwapShift = { workDate: string; startAt: string; endAt: string };
 
 /** The menu, in the order staff reach for them; corrections are always there. */
-const MENU: ('correction' | Me['profile']['requestTypes'][number])[] = ['correction', 'leave', 'overtime', 'out_of_office', 'business_trip', 'shift_swap', 'absence'];
+const MENU: ('correction' | Me['profile']['requestTypes'][number])[] = ['correction', 'leave', 'day_off', 'overtime', 'out_of_office', 'business_trip', 'shift_swap', 'absence'];
 const ICON: Record<(typeof MENU)[number], string> = {
   correction: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM12 7v5l3 2',
   leave: 'M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z',
@@ -29,6 +30,7 @@ const ICON: Record<(typeof MENU)[number], string> = {
   out_of_office: 'M12 21s-7-6.2-7-12a7 7 0 0 1 14 0c0 5.8-7 12-7 12ZM12 11.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z',
   business_trip: 'M4 8h16v12H4zM9 8V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3M4 13h16',
   shift_swap: 'M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7',
+  day_off: 'M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2ZM9 15l2 2 4-4',
   absence: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM9 9l6 6M15 9l-6 6',
 };
 
@@ -79,6 +81,7 @@ export function Requests({ types, onNew }: {
       const m = overtimeMinutes(r.startTime, r.endTime);
       return `${day(r.startDate)} · ${num(r.startTime)}–${num(r.endTime)} · ${t('requests.otHours', { hours: num(Math.floor(m / 60)), minutes: num(String(m % 60).padStart(2, '0')) })}`;
     }
+    if (r.type === 'day_off' && r.workInsteadOn) return t('dayoff.request.period', { off: day(r.startDate), work: day(r.workInsteadOn) });
     if (r.leaveUnit === 'half_day' && r.halfDayPart) return `${day(r.startDate)} · ${t(`requests.part.${r.halfDayPart}`)}`;
     if (r.leaveUnit === 'hours') return `${day(r.startDate)} · ${num(r.startTime ?? '')}–${num(r.endTime ?? '')}`;
     return r.endDate && r.endDate !== r.startDate ? `${day(r.startDate)} – ${day(r.endDate)}` : day(r.startDate);

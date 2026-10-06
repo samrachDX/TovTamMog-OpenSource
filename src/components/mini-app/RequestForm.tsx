@@ -11,12 +11,12 @@ import { Button, Header, Notice } from './ui';
  * Opened from the Clock button without scanning: the form asks for just the one time
  * being corrected, clock-in when they have not clocked in yet, clock-out when they have.
  */
-export type ClockFocus = { only: 'in' | 'out'; date?: string };
+export type ClockFocus = { only?: 'in' | 'out'; date?: string };
 
 export type RecordRef = { id: string; workDate: string; clockInAt: string | null; clockOutAt: string | null };
 export type RequestKind =
   | 'leave' | 'absence' | 'late' | 'missed_clock_out' | 'correction' | 'overtime' | 'missed_clock_in'
-  | 'out_of_office' | 'business_trip' | 'shift_swap';
+  | 'out_of_office' | 'business_trip' | 'shift_swap' | 'day_off';
 
 type SwapShift = { id: string; workDate: string; startAt: string; endAt: string };
 type SwapOptions = { mine: SwapShift[]; theirs: (SwapShift & { employeeId: string; employeeCode: string; nameKm: string; nameEn: string | null })[] };
@@ -70,6 +70,9 @@ export function RequestForm({ kind, record, focus, nightShifts = false, onDone }
   const [clockIn, setClockIn] = useState('');
   const [clockOut, setClockOut] = useState('');
   const [outNextDay, setOutNextDay] = useState(false);
+  const [workInstead, setWorkInstead] = useState(false);
+  const [workDate, setWorkDate] = useState('');
+  const [policy, setPolicy] = useState<{ minNoticeDays: number; blackouts: { startsOn: string; endsOn: string; note: string }[] } | null>(null);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -103,6 +106,17 @@ export function RequestForm({ kind, record, focus, nightShifts = false, onDone }
       (d) => { if (live) { setSwap(d); setMineId((cur) => cur || d.mine[0]?.id || ''); } },
       (err) => { if (live) { setSwap({ mine: [], theirs: [] }); setError(errorText(err)); } },
     );
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind]);
+
+  // Day off: the branch's notice period and busy dates, shown before sending.
+  useEffect(() => {
+    if (kind !== 'day_off') return;
+    let live = true;
+    api<{ rules: { minNoticeDays: number; blackouts: { startsOn: string; endsOn: string; note: string }[] } }>(
+      `/api/schedule?from=${today}&to=${today}`, { locale },
+    ).then((d) => { if (live) setPolicy(d.rules); }, () => {});
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind]);
@@ -165,7 +179,8 @@ export function RequestForm({ kind, record, focus, nightShifts = false, onDone }
   const otOk = kind !== 'overtime' || (otFrom !== otTo && otMinutes <= 12 * 60 && (nightShifts || otTo > otFrom));
   const awayOk = kind === 'out_of_office' ? toTime > fromTime : kind === 'business_trip' ? endDate >= startDate : true;
   const swapOk = kind !== 'shift_swap' || (!!mineId && !!theirsId);
-  const valid = reason.trim().length >= 3 && timesOk && leaveOk && typeOk && otOk && awayOk && swapOk;
+  const dayOffOk = kind !== 'day_off' || (!!startDate && (!workInstead || (!!workDate && workDate !== startDate)));
+  const valid = reason.trim().length >= 3 && timesOk && leaveOk && typeOk && otOk && awayOk && swapOk && dayOffOk;
 
   const submit = async () => {
     setBusy(true);
@@ -183,6 +198,7 @@ export function RequestForm({ kind, record, focus, nightShifts = false, onDone }
       if (kind === 'out_of_office') Object.assign(body, { startDate, startTime: fromTime, endTime: toTime });
       if (kind === 'business_trip') Object.assign(body, { startDate, endDate });
       if (kind === 'shift_swap') Object.assign(body, { swapShiftId: mineId, swapWithShiftId: theirsId });
+      if (kind === 'day_off') Object.assign(body, { startDate, workInsteadOn: workInstead ? workDate : undefined });
       if (missedIn) {
         Object.assign(body, { startDate, proposedClockIn: { date: startDate, time: clockIn } });
         if (clockOut) body.proposedClockOut = { date: outNextDay ? nextDay(startDate) : startDate, time: clockOut };
@@ -350,6 +366,34 @@ export function RequestForm({ kind, record, focus, nightShifts = false, onDone }
             </label>
           </div>
           <p className="text-sm text-muted">{t('requests.remoteNote')}</p>
+        </>
+      ) : null}
+      {kind === 'day_off' ? (
+        <>
+          <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('requests.dayOff.date')}</span>
+            <input type="date" required min={today} className={INPUT} value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+          </label>
+          <label className="flex min-h-11 items-center gap-3 text-sm">
+            <input type="checkbox" className="size-5" checked={workInstead} onChange={(e) => setWorkInstead(e.target.checked)} />
+            <span>{t('requests.dayOff.workInstead')}</span>
+          </label>
+          {workInstead ? (
+            <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('requests.dayOff.workDate')}</span>
+              <input type="date" required min={today} className={INPUT} value={workDate} onChange={(e) => setWorkDate(e.target.value)} />
+            </label>
+          ) : null}
+          {policy ? (
+            <div className="rounded-xl bg-pale px-3 py-2 text-sm">
+              <p>{t('myschedule.notice', { days: num(policy.minNoticeDays) })}</p>
+              {policy.blackouts.length ? (
+                <p className="mt-1 text-warning">
+                  {t('requests.dayOff.busy')}{' '}
+                  {policy.blackouts.map((b) => (b.startsOn === b.endsOn ? day(b.startsOn) : `${day(b.startsOn)}–${day(b.endsOn)}`)).join(', ')}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+          <p className="text-sm text-muted">{t('requests.dayOff.note')}</p>
         </>
       ) : null}
       {kind === 'shift_swap' ? (

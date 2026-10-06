@@ -262,7 +262,7 @@ export async function updateEmployee(db: Db, actor: Actor, id: string, input: In
  * must not be able to take over an organization-wide account. Organization-wide super
  * admins are exempt.
  */
-async function assertOutranks(db: Db, actor: Actor, targetId: string, permission: Permission): Promise<void> {
+export async function assertOutranks(db: Db, actor: Actor, targetId: string, permission: Permission): Promise<void> {
   if (targetId === actor.employeeId) throw new AppError('FORBIDDEN');
   const rows = await db.query<{ id: string; rank: number; org_wide: boolean; role_key: string }>(
     `select ra.employee_id as id, r.rank, ra.branch_id is null as org_wide, ra.role_key

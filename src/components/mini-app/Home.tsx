@@ -9,6 +9,7 @@ import { LottieAnimation } from '@/components/LottieAnimation';
 import { getPosition } from './ClockFlow';
 import { FeedSection, type Feed } from './Feed';
 import { MonthSummary } from './Reports';
+import { WeekStrip } from './MySchedule';
 import type { ClockFocus, RecordRef, RequestKind } from './RequestForm';
 import { Button, LanguageSwitch, Notice } from './ui';
 
@@ -21,7 +22,7 @@ export type Me = {
     category: { km: string; en: string };
     branches: { id: string; nameKm: string; nameEn: string; isPrimary: boolean; requireQr: boolean }[];
     nightShifts: boolean;
-    requestTypes: ('leave' | 'absence' | 'overtime' | 'out_of_office' | 'business_trip' | 'shift_swap')[];
+    requestTypes: ('leave' | 'absence' | 'overtime' | 'out_of_office' | 'business_trip' | 'shift_swap' | 'day_off')[];
     clockInReminders: number[];
     clockOutReminder: number | null;
     notifyTelegram: boolean;
@@ -63,9 +64,9 @@ const STATE_TONE: Record<Me['overview']['state'], string> = {
   under_review: 'bg-warning-pale text-warning',
 };
 
-export function Home({ me, onClock, onRequest, onReports }: {
+export function Home({ me, onClock, onRequest, onReports, onSchedule }: {
   me: Me; onClock(action: 'clock_in' | 'clock_out', branchId?: string, remote?: boolean): void;
-  onRequest(kind: RequestKind, record?: RecordRef, focus?: ClockFocus): void; onReports(): void;
+  onRequest(kind: RequestKind, record?: RecordRef, focus?: ClockFocus): void; onReports(): void; onSchedule(): void;
 }) {
   const [choosing, setChoosing] = useState(false);
   const { t, locale, timeZone, time, longDate, num, day } = useI18n();
@@ -234,6 +235,7 @@ export function Home({ me, onClock, onRequest, onReports }: {
 
       <FeedSection feed={me.feed} />
 
+      <WeekStrip onOpen={onSchedule} />
       <MonthSummary onOpen={onReports} />
 
     </>

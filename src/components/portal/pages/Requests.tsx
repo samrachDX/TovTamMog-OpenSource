@@ -7,11 +7,12 @@ import { AttachmentList, type AttachmentRef } from '@/components/AttachmentList'
 import { overtimeMinutes } from '@/components/mini-app/RequestForm';
 import { usePortal } from '../PortalShell';
 import { EmployeePicker } from '../EmployeePicker';
+import { WarningList, type Warning } from '../DaysOff';
 import {
   Badge, Card, DataTable, Dialog, Field, LoadState, Notice, PageHeader, Pager, Select, SmallButton, TextInput, useLoad, type Column,
 } from '../ui';
 
-type Kind = 'leave' | 'absence' | 'late' | 'missed_clock_in' | 'missed_clock_out' | 'correction' | 'overtime' | 'out_of_office' | 'business_trip' | 'shift_swap';
+type Kind = 'leave' | 'absence' | 'late' | 'missed_clock_in' | 'missed_clock_out' | 'correction' | 'overtime' | 'out_of_office' | 'business_trip' | 'shift_swap' | 'day_off';
 type SwapShift = { workDate: string; startAt: string; endAt: string };
 type Item = {
   id: string; type: Kind; status: 'pending' | 'approved' | 'rejected' | 'cancelled'; reason: string;
@@ -24,9 +25,10 @@ type Item = {
   leaveTypeKm: string | null; leaveTypeEn: string | null; attachments: AttachmentRef[];
   otShift: { startAt: string; endAt: string } | null; otRecord: { clockInAt: string | null; clockOutAt: string | null } | null;
   swap: { mine: SwapShift; theirs: SwapShift; with: { employeeCode: string; nameKm: string; nameEn: string | null } } | null;
+  workInsteadOn: string | null; dayOffBranchId: string | null;
 };
 
-const KINDS: Kind[] = ['leave', 'absence', 'late', 'missed_clock_in', 'missed_clock_out', 'correction', 'overtime', 'out_of_office', 'business_trip', 'shift_swap'];
+const KINDS: Kind[] = ['leave', 'day_off', 'absence', 'late', 'missed_clock_in', 'missed_clock_out', 'correction', 'overtime', 'out_of_office', 'business_trip', 'shift_swap'];
 const TONE = { pending: 'warn', approved: 'ok', rejected: 'bad', cancelled: 'muted' } as const;
 const LIMIT = 50;
 
@@ -59,6 +61,7 @@ export function Requests() {
   const period = (r: Item) => {
     if (!r.startDate) return r.workDate ? day(r.workDate) : '—';
     if (r.type === 'overtime') return `${day(r.startDate)} · ${num(r.startTime ?? '')}–${num(r.endTime ?? '')} · ${hm(otMinutes(r))}`;
+    if (r.type === 'day_off' && r.workInsteadOn) return t('dayoff.request.period', { off: day(r.startDate), work: day(r.workInsteadOn) });
     if (r.leaveUnit === 'half_day' && r.halfDayPart) return `${day(r.startDate)} · ${t(`requests.part.${r.halfDayPart}`)}`;
     if (r.leaveUnit === 'hours') return `${day(r.startDate)} · ${num(r.startTime ?? '')}–${num(r.endTime ?? '')}`;
     return r.endDate && r.endDate !== r.startDate ? `${day(r.startDate)} – ${day(r.endDate)}` : day(r.startDate);
@@ -106,7 +109,8 @@ export function Requests() {
   const changesRecord = open && (open.type === 'missed_clock_out' || open.type === 'correction' || open.type === 'missed_clock_in');
   // Approving a correction rewrites the record, which needs attendance.approve at that branch.
   const mayDecide = open && open.status === 'pending' && open.employeeId !== me.employeeId
-    && (!changesRecord || can('attendance.approve', open.branchId));
+    && (!changesRecord || can('attendance.approve', open.branchId))
+    && (open.type !== 'day_off' || (!!open.dayOffBranchId && can('schedule.manage', open.dayOffBranchId)));
 
   return (
     <>
@@ -199,6 +203,9 @@ export function Requests() {
               </dl>
             ) : null}
             {open.type === 'out_of_office' || open.type === 'business_trip' ? <p className="text-sm text-muted">{t('requests.remoteNote')}</p> : null}
+            {open.type === 'day_off' && open.status === 'pending' && open.startDate && open.dayOffBranchId && mayDecide ? (
+              <DayOffCheck key={open.id} item={open} />
+            ) : null}
             {open.type === 'late' && open.clockInAt ? <p className="text-sm text-muted">{t('home.clockInTime')}: {time(open.clockInAt)}</p> : null}
             <div className="rounded-lg bg-pale p-3 text-sm">
               <p className="mb-1 text-muted">{t('portal.reason')}</p>
@@ -317,4 +324,22 @@ function EnterAway({ onClose }: { onClose(saved: boolean): void }) {
       </div>
     </Dialog>
   );
+}
+
+/** Before approving a day off: the staffing warnings it would raise at the branch, or why it cannot be done. */
+function DayOffCheck({ item }: { item: Item }) {
+  const { t, locale } = useI18n();
+  const state = useLoad(
+    () => api<{ warnings: Warning[]; problem: { code: string; message: string } | null }>('/api/portal/schedule/days-off', {
+      locale,
+      body: {
+        type: 'preview', requestId: item.id, branchId: item.dayOffBranchId, employeeId: item.employeeId,
+        offDate: item.startDate, workDate: item.workInsteadOn ?? undefined,
+      },
+    }),
+    [item.id],
+  );
+  if (!state.data) return state.loading ? <p className="text-sm text-muted">{t('dayoff.change.checking')}</p> : null;
+  if (state.data.problem) return <Notice tone="danger">{state.data.problem.message}</Notice>;
+  return state.data.warnings.length ? <WarningList warnings={state.data.warnings} /> : <Notice tone="success">{t('dayoff.request.fine')}</Notice>;
 }

@@ -12,6 +12,10 @@ export type NotificationKind =
   | 'pin_reset'
   | 'shift_swap_asked'
   | 'shift_swapped'
+  | 'day_off_moved'
+  | 'day_off_added'
+  | 'day_off_removed'
+  | 'day_off_plan'
   | 'reminder_clock_in'
   | 'reminder_clock_out'
   | 'event';

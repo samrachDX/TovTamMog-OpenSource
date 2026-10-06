@@ -12,7 +12,7 @@ type Input = Record<string, unknown>;
 export const HORIZON_DAYS = 21;
 const MAX_AHEAD_DAYS = 92;
 
-const WEEKDAY_KEYS: MessageKey[] = [
+export const WEEKDAY_KEYS: MessageKey[] = [
   'portal.weekday.mon', 'portal.weekday.tue', 'portal.weekday.wed', 'portal.weekday.thu',
   'portal.weekday.fri', 'portal.weekday.sat', 'portal.weekday.sun',
 ];
@@ -71,7 +71,7 @@ export async function listEmployeeWeekly(db: Db, actor: Actor, employeeId: strin
  */
 export async function generateWeeklyShifts(
   db: Db,
-  opts: { now?: Date; until?: string; branchId?: string; scheduleId?: string } = {},
+  opts: { now?: Date; until?: string; branchId?: string; scheduleId?: string; employeeId?: string } = {},
 ): Promise<number> {
   const now = opts.now ?? new Date();
   const patterns = await db.query<{
@@ -86,8 +86,9 @@ export async function generateWeeklyShifts(
      join shift_templates st on st.id = w.template_id
      join employees e on e.id = w.employee_id
      where w.active and b.status = 'active' and e.status = 'active'
-       and ($1::uuid is null or w.branch_id = $1::uuid) and ($2::uuid is null or w.id = $2::uuid)`,
-    [opts.branchId ?? null, opts.scheduleId ?? null],
+       and ($1::uuid is null or w.branch_id = $1::uuid) and ($2::uuid is null or w.id = $2::uuid)
+       and ($3::uuid is null or w.employee_id = $3::uuid)`,
+    [opts.branchId ?? null, opts.scheduleId ?? null, opts.employeeId ?? null],
   );
   let created = 0;
   for (const p of patterns) {

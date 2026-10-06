@@ -16,6 +16,7 @@ import { PinPad } from './PinPad';
 import { RequestForm, type ClockFocus, type RecordRef, type RequestKind } from './RequestForm';
 import { Reports } from './Reports';
 import { Requests } from './Requests';
+import { MySchedule } from './MySchedule';
 import { Settings } from './Settings';
 import { Button, Header, LanguageSwitch, Notice, Screen, Spinner } from './ui';
 
@@ -27,6 +28,7 @@ type Phase =
   | { name: 'pin_required' }
   | { name: 'ready'; me: Me; tab: Tab }
   | { name: 'request'; me: Me; back: Tab; kind: RequestKind; record?: RecordRef; focus?: ClockFocus }
+  | { name: 'schedule'; me: Me; back: Tab }
   | { name: 'clocking'; me: Me; action: 'clock_in' | 'clock_out'; branchId?: string; remote?: boolean }
   | { name: 'error'; message: string };
 
@@ -257,6 +259,7 @@ function Flow() {
               onClock={(action, branchId, remote) => setPhase({ name: 'clocking', me, action, branchId, remote })}
               onRequest={(kind, record, focus) => setPhase({ name: 'request', me, back: 'home', kind, record, focus })}
               onReports={() => go('history')}
+              onSchedule={() => setPhase({ name: 'schedule', me, back: 'home' })}
             /> : null}
           {tab === 'history' ? <Reports onRequest={(kind, record, focus) => setPhase({ name: 'request', me, back: 'history', kind, record, focus })} /> : null}
           {tab === 'requests' ? (
@@ -294,6 +297,17 @@ function Flow() {
             nightShifts={phase.me.profile.nightShifts}
             // After sending, show the list of requests; after cancelling, go back where they were.
             onDone={(saved) => setPhase({ name: 'ready', me: phase.me, tab: saved ? 'requests' : phase.back })}
+          />
+        </Screen>
+      );
+
+    case 'schedule':
+      return (
+        <Screen>
+          <MySchedule
+            canAsk={phase.me.profile.requestTypes.includes('day_off')}
+            onAsk={(date) => setPhase({ name: 'request', me: phase.me, back: phase.back, kind: 'day_off', focus: date ? { date } : undefined })}
+            onBack={() => setPhase({ name: 'ready', me: phase.me, tab: phase.back })}
           />
         </Screen>
       );

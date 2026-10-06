@@ -8,6 +8,7 @@ import { hitRateLimit } from '@/lib/auth/rate-limit';
 import { expectedHours, recomputeLateness } from '@/lib/attendance/leave';
 import { sniffContentType } from '@/lib/admin/files';
 import { requireNightShifts, requireRequestType } from '@/lib/admin/settings';
+import { approveDayOffRequest, checkDayOffRequest, dayOffRequestBranch } from '@/lib/admin/days-off';
 import { earlyLeaveMinutes, lateMinutes } from '@/lib/attendance/timing';
 import { DATE, TIME, date, oneOf, optText, optUuid, paging, requireCan, scopeOf, text, time, uuid, type Actor } from '@/lib/admin/actor';
 
@@ -15,7 +16,7 @@ type Input = Record<string, unknown>;
 
 export const REQUEST_TYPES = [
   'leave', 'absence', 'late', 'missed_clock_out', 'correction', 'overtime', 'missed_clock_in',
-  'out_of_office', 'business_trip', 'shift_swap',
+  'out_of_office', 'business_trip', 'shift_swap', 'day_off',
 ] as const;
 /** An approved one of these lets the person clock in and out remotely while it lasts. */
 export const REMOTE_TYPES: readonly string[] = ['out_of_office', 'business_trip'];
@@ -274,6 +275,7 @@ export async function createRequest(
     let swapShiftId: string | null = null;
     let swapWithShiftId: string | null = null;
     let swapWithEmployeeId: string | null = null;
+    let workInsteadOn: string | null = null;
 
     if (type === 'leave') {
       // Older copies of the Mini App send no type; they get the first one in the list.
@@ -357,6 +359,12 @@ export async function createRequest(
       swapWithShiftId = swap.theirs.id;
       swapWithEmployeeId = swap.theirs.employee_id;
       recordBranchId = swap.mine.branch_id;
+    } else if (type === 'day_off') {
+      // A day off, optionally offering to work another day instead.
+      startDate = date(input, 'startDate');
+      endDate = startDate;
+      workInsteadOn = input.workInsteadOn ? date(input, 'workInsteadOn') : null;
+      ({ branchId: recordBranchId } = await checkDayOffRequest(tx, who, startDate, workInsteadOn, now));
     } else if (type === 'missed_clock_in') {
       // Forgot to scan: the day's record is created from these times once a manager approves.
       startDate = date(input, 'startDate');
@@ -410,10 +418,11 @@ export async function createRequest(
       const rows = await tx.query<{ id: string }>(
         `insert into employee_requests (org_id, employee_id, type, reason, start_date, end_date, attendance_record_id,
            proposed_clock_in_at, proposed_clock_out_at, previous_record_status, created_at, updated_at,
-           leave_unit, half_day_part, start_time, end_time, leave_type_id, swap_shift_id, swap_with_employee_id, swap_with_shift_id)
-         values ($1, $2, $3, $4, $5::date, $6::date, $7, $8, $9, $10, $11, $11, $12, $13, $14::time, $15::time, $16, $17, $18, $19) returning id`,
+           leave_unit, half_day_part, start_time, end_time, leave_type_id, swap_shift_id, swap_with_employee_id, swap_with_shift_id,
+           work_instead_on)
+         values ($1, $2, $3, $4, $5::date, $6::date, $7, $8, $9, $10, $11, $11, $12, $13, $14::time, $15::time, $16, $17, $18, $19, $20::date) returning id`,
         [who.orgId, who.employeeId, type, why, startDate, endDate, recordId, proposedIn, proposedOut, previousStatus, now,
-          leaveUnit, halfDayPart, startTime, endTime, leaveTypeId, swapShiftId, swapWithEmployeeId, swapWithShiftId],
+          leaveUnit, halfDayPart, startTime, endTime, leaveTypeId, swapShiftId, swapWithEmployeeId, swapWithShiftId, workInsteadOn],
       );
       id = rows[0].id;
     } catch (err) {
@@ -438,8 +447,9 @@ export async function createRequest(
     // A correction is decided at the record's branch and needs attendance.approve as well.
     const branches = (await tx.query<{ branch_id: string }>(`select branch_id from employee_branches where employee_id = $1`, [who.employeeId])).map((b) => b.branch_id);
     const changesRecord = CHANGES_RECORD.includes(type);
-    const scope = (changesRecord || type === 'shift_swap') && recordBranchId ? [recordBranchId] : branches;
-    const needed = changesRecord ? ['request.review', 'attendance.approve'] : type === 'shift_swap' ? ['request.review', 'schedule.manage'] : ['request.review'];
+    const scheduleChange = type === 'shift_swap' || type === 'day_off';
+    const scope = (changesRecord || scheduleChange) && recordBranchId ? [recordBranchId] : branches;
+    const needed = changesRecord ? ['request.review', 'attendance.approve'] : scheduleChange ? ['request.review', 'schedule.manage'] : ['request.review'];
     const canDecide = await approvers(tx, who.orgId, scope, needed, [who.employeeId, ...(swapWithEmployeeId ? [swapWithEmployeeId] : [])]);
     const extra = await branchRecipients(tx, branches, [who.employeeId, ...(swapWithEmployeeId ? [swapWithEmployeeId] : [])]);
     const me = await tx.query<{ name_km: string; name_en: string | null }>(`select name_km, name_en from employees where id = $1`, [who.employeeId]);
@@ -468,7 +478,9 @@ const REQUEST_SELECT = `
          to_char(q.start_time, 'HH24:MI') as "startTime", to_char(q.end_time, 'HH24:MI') as "endTime",
          q.attendance_record_id as "attendanceRecordId", q.proposed_clock_in_at as "proposedClockInAt",
          q.proposed_clock_out_at as "proposedClockOutAt", q.created_at as "createdAt", q.decided_at as "decidedAt",
-         q.decision_note as "decisionNote",
+         q.decision_note as "decisionNote", q.work_instead_on::text as "workInsteadOn",
+         case when q.type = 'day_off' then (select s.branch_id from shift_assignments s where s.employee_id = q.employee_id
+           and s.work_date = q.start_date and s.status <> 'cancelled' order by s.start_at limit 1) end as "dayOffBranchId",
          e.id as "employeeId", e.employee_code as "employeeCode", e.name_km as "nameKm", e.name_en as "nameEn",
          rv.name_km as "reviewerKm", rv.name_en as "reviewerEn",
          r.work_date::text as "workDate", r.clock_in_at as "clockInAt", r.clock_out_at as "clockOutAt",
@@ -842,9 +854,10 @@ export async function decideRequest(db: Db, actor: Actor, id: string, input: Inp
       proposed_clock_in_at: Date | null; proposed_clock_out_at: Date | null; leave_unit: string; start_date: string | null;
       start_time: string | null; end_time: string | null;
       swap_shift_id: string | null; swap_with_shift_id: string | null; swap_with_employee_id: string | null;
+      work_instead_on: string | null;
     }>(
       `select employee_id, org_id, type, status, reason, attendance_record_id, previous_record_status,
-              swap_shift_id, swap_with_shift_id, swap_with_employee_id,
+              swap_shift_id, swap_with_shift_id, swap_with_employee_id, work_instead_on::text as work_instead_on,
               proposed_clock_in_at, proposed_clock_out_at, leave_unit, start_date::text as start_date,
               to_char(start_time, 'HH24:MI') as start_time, to_char(end_time, 'HH24:MI') as end_time
        from employee_requests where id = $1 for update`,
@@ -887,6 +900,15 @@ export async function decideRequest(db: Db, actor: Actor, id: string, input: Inp
           employeeId: theirs.employee_id, kind: 'shift_swapped', data: { requestId: id },
           params: { date: dmy(theirs.work_date), other: dmy(mine.work_date) },
         }], now);
+      }
+    }
+    if (req.type === 'day_off') {
+      // Decided where the person works that day, by someone ranked above them.
+      if (decision === 'approved') {
+        await approveDayOffRequest(tx, actor, { id, employee_id: req.employee_id, start_date: req.start_date!, work_instead_on: req.work_instead_on, reason: req.reason }, now);
+      } else {
+        const branchId = await dayOffRequestBranch(tx, req.employee_id, req.start_date!);
+        if (branchId) requireCan(actor, 'schedule.manage', branchId);
       }
     }
     const changesRecord = req.type === 'missed_clock_out' || req.type === 'correction';

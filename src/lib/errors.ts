@@ -82,6 +82,16 @@ export const ERROR_CODES = [
   'LEAVE_TYPE_NAME_TAKEN',
   'ATTACHMENT_REQUIRED',
   'TOO_MANY_ATTACHMENTS',
+  // Days off
+  'DAY_OFF_ALREADY_OFF',
+  'DAY_OFF_WORKING',
+  'DAY_OFF_ON_LEAVE',
+  'DAY_OFF_NOTICE',
+  'DAY_OFF_BLACKOUT',
+  'DAY_OFF_FULL',
+  'DAY_OFF_LIMIT',
+  'DAY_OFF_NEEDS_SHIFT',
+  'COVERAGE_CONFIRM',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

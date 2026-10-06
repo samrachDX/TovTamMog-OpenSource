@@ -5,10 +5,10 @@ import { api } from '@/lib/client/api';
 import { useI18n } from '@/components/mini-app/i18n-context';
 import { Card, Notice, Check, Field, LoadState, PageHeader, Select, SmallButton, useLoad } from '../ui';
 
-type RequestType = 'leave' | 'absence' | 'overtime' | 'out_of_office' | 'business_trip' | 'shift_swap';
+type RequestType = 'leave' | 'absence' | 'overtime' | 'out_of_office' | 'business_trip' | 'shift_swap' | 'day_off';
 type Settings = { nightShifts: boolean; pinRememberDays: number; requestTypes: RequestType[] };
 
-const REQUEST_TYPES: RequestType[] = ['leave', 'absence', 'overtime', 'out_of_office', 'business_trip', 'shift_swap'];
+const REQUEST_TYPES: RequestType[] = ['leave', 'day_off', 'absence', 'overtime', 'out_of_office', 'business_trip', 'shift_swap'];
 
 const REMEMBER_DAYS = [0, 1, 3, 7, 14, 30];
 

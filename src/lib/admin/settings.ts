@@ -15,7 +15,7 @@ export type OrgSettings = {
 };
 
 /** Request kinds an organization can switch on or off. */
-export const OPTIONAL_REQUEST_TYPES = ['leave', 'absence', 'overtime', 'out_of_office', 'business_trip', 'shift_swap'] as const;
+export const OPTIONAL_REQUEST_TYPES = ['leave', 'absence', 'overtime', 'out_of_office', 'business_trip', 'shift_swap', 'day_off'] as const;
 export type OptionalRequestType = (typeof OPTIONAL_REQUEST_TYPES)[number];
 
 export async function getSettings(db: Db, orgId: string): Promise<OrgSettings> {

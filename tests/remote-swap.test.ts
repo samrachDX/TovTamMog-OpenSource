@@ -157,7 +157,7 @@ describe('shift swap', () => {
 describe('request kinds switched on and off', () => {
   it('starts with the new kinds off and lets an administrator change it', async () => {
     await db.query(`update organizations set disabled_request_types = default`);
-    expect((await getSettings(db, f.orgId)).requestTypes).toEqual(['leave', 'absence', 'overtime']);
+    expect((await getSettings(db, f.orgId)).requestTypes).toEqual(['leave', 'absence', 'overtime', 'day_off']);
     await expect(createRequest(db, me(day(12, ++hr)), { type: 'business_trip', startDate: '2026-10-14', endDate: '2026-10-14', reason: 'ធ្វើដំណើរ' }))
       .rejects.toThrow('REQUEST_TYPE_OFF');
     expect((await getProfile(db, f.employeeId)).requestTypes).not.toContain('business_trip');
