@@ -141,11 +141,11 @@ export function Home({ me, onClock, onRequest, onReports }: {
           <TimeBox label={t('home.clockInTime')} value={record?.clockInAt ? time(record.clockInAt) : '—'} />
           <TimeBox label={t('home.clockOutTime')} value={record?.clockOutAt ? time(record.clockOutAt) : '—'} />
         </div>
-        {record && record.lateMinutes > 0 ? (
-          <Notice tone="warning">{t('home.lateBy', { minutes: record.lateMinutes })}</Notice>
-        ) : null}
-        {record && record.earlyLeaveMinutes > 0 ? (
-          <Notice tone="warning">{t('home.earlyBy', { minutes: record.earlyLeaveMinutes })}</Notice>
+        {record && (record.lateMinutes > 0 || record.earlyLeaveMinutes > 0) ? (
+          <div className="flex flex-wrap gap-1.5">
+            {record.lateMinutes > 0 ? <Chip>{t('home.lateBy', { minutes: record.lateMinutes })}</Chip> : null}
+            {record.earlyLeaveMinutes > 0 ? <Chip>{t('home.earlyBy', { minutes: record.earlyLeaveMinutes })}</Chip> : null}
+          </div>
         ) : null}
         {overview.state === 'missed_clock_out' ? <Notice tone="warning">{t('errors.MISSED_CLOCK_OUT')}</Notice> : null}
         {record && overview.correctionPending ? <Notice tone="info">{t('home.correctionPending')}</Notice> : null}
@@ -158,84 +158,84 @@ export function Home({ me, onClock, onRequest, onReports }: {
             {t('history.fixMissed')}
           </button>
         ) : null}
+        {next ? (
+          <div className="flex flex-col gap-2">
+            {choosing ? (
+              // Scanning is the normal way. Away from the branch: clock remotely under an approved
+              // out-of-office or trip, ask for one, or (already late) send the real time as a correction.
+              <section aria-label={t(next === 'clock_in' ? 'attendance.clockIn' : 'attendance.clockOut')} className="flex flex-col gap-2">
+                {range ? <RangeLine range={range} branch={branch ? pick(branch.nameKm, branch.nameEn) : ''} onRecheck={recheck} /> : null}
+                {remote && branch ? (
+                  <>
+                    <Button className="min-h-14" onClick={() => { setChoosing(false); onClock(next, branch.id, true); }}>
+                      {t(next === 'clock_in' ? 'attendance.remoteIn' : 'attendance.remoteOut')}
+                    </Button>
+                    <p className="px-1 text-sm text-success">
+                      {t('home.remoteCover', {
+                        type: t(`requests.type.${remote.type}`),
+                        period: remote.type === 'out_of_office'
+                          ? `${num(remote.startTime ?? '')}–${num(remote.endTime ?? '')}`
+                          : remote.endDate && remote.endDate !== remote.startDate ? `${day(remote.startDate)} – ${day(remote.endDate)}` : day(remote.startDate),
+                      })}
+                    </p>
+                  </>
+                ) : null}
+                {noScan ? (
+                  <Button variant={remote ? 'secondary' : undefined} className="min-h-14" onClick={() => { setChoosing(false); onClock(next, branch.id); }}>
+                    {t(next === 'clock_in' ? 'attendance.choose.nowIn' : 'attendance.choose.nowOut')}
+                  </Button>
+                ) : null}
+                <Button variant={noScan || remote ? 'secondary' : undefined} className="min-h-14" onClick={() => { setChoosing(false); onClock(next); }}>
+                  {t('attendance.choose.scan')}
+                </Button>
+                {away && !remote && offsite.length ? (
+                  <div className="flex flex-col gap-2 rounded-xl bg-pale p-3">
+                    <p className="text-sm font-semibold">{t('home.offsite.title')}</p>
+                    <p className="text-sm text-muted">{t('home.offsite.body')}</p>
+                    <div className={`grid gap-2 ${offsite.length > 1 ? 'grid-cols-2' : ''}`}>
+                      {offsite.map((k) => (
+                        <Button key={k} variant="secondary" onClick={() => { setChoosing(false); onRequest(k); }}>{t(`requests.type.${k}`)}</Button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                {away && late && !remote ? (
+                  <>
+                    <Button
+                      variant="secondary"
+                      className="min-h-14"
+                      onClick={() => {
+                        setChoosing(false);
+                        // Not clocked in yet: correct the clock-in. Already clocked in: correct the clock-out.
+                        if (next === 'clock_in') onRequest('missed_clock_in', undefined, { only: 'in', date: overview.shift?.workDate });
+                        else if (record) onRequest('correction', record, { only: 'out' });
+                      }}
+                    >
+                      {t(next === 'clock_in' ? 'attendance.choose.forgotIn' : 'attendance.choose.forgotOut')}
+                    </Button>
+                    <p className="px-1 text-sm text-muted">{t('attendance.choose.note')}</p>
+                  </>
+                ) : null}
+                <button type="button" className="pressable min-h-11 text-sm text-muted" onClick={() => setChoosing(false)}>{t('common.back')}</button>
+              </section>
+            ) : (
+              <>
+                <Button className="min-h-14 text-lg" onClick={() => setChoosing(true)}>
+                  {t(next === 'clock_in' ? 'attendance.clockIn' : 'attendance.clockOut')}
+                </Button>
+                <p className="text-center text-sm text-muted">
+                  {remote ? t('home.remoteReady') : t(noScan ? 'attendance.noScanHint' : 'attendance.scanHint')}
+                </p>
+              </>
+            )}
+          </div>
+        ) : null}
       </section>
 
       <FeedSection feed={me.feed} />
 
       <MonthSummary onOpen={onReports} />
 
-      {next ? (
-        <div className="mt-auto flex flex-col gap-2">
-          {choosing ? (
-            // Scanning is the normal way. Away from the branch: clock remotely under an approved
-            // out-of-office or trip, ask for one, or (already late) send the real time as a correction.
-            <section aria-label={t(next === 'clock_in' ? 'attendance.clockIn' : 'attendance.clockOut')} className="flex flex-col gap-2 rounded-2xl border border-line p-3">
-              {range ? <RangeLine range={range} branch={branch ? pick(branch.nameKm, branch.nameEn) : ''} onRecheck={recheck} /> : null}
-              {remote && branch ? (
-                <>
-                  <Button className="min-h-14" onClick={() => { setChoosing(false); onClock(next, branch.id, true); }}>
-                    {t(next === 'clock_in' ? 'attendance.remoteIn' : 'attendance.remoteOut')}
-                  </Button>
-                  <p className="px-1 text-sm text-success">
-                    {t('home.remoteCover', {
-                      type: t(`requests.type.${remote.type}`),
-                      period: remote.type === 'out_of_office'
-                        ? `${num(remote.startTime ?? '')}–${num(remote.endTime ?? '')}`
-                        : remote.endDate && remote.endDate !== remote.startDate ? `${day(remote.startDate)} – ${day(remote.endDate)}` : day(remote.startDate),
-                    })}
-                  </p>
-                </>
-              ) : null}
-              {noScan ? (
-                <Button variant={remote ? 'secondary' : undefined} className="min-h-14" onClick={() => { setChoosing(false); onClock(next, branch.id); }}>
-                  {t(next === 'clock_in' ? 'attendance.choose.nowIn' : 'attendance.choose.nowOut')}
-                </Button>
-              ) : null}
-              <Button variant={noScan || remote ? 'secondary' : undefined} className="min-h-14" onClick={() => { setChoosing(false); onClock(next); }}>
-                {t('attendance.choose.scan')}
-              </Button>
-              {away && !remote && offsite.length ? (
-                <div className="flex flex-col gap-2 rounded-xl bg-pale p-3">
-                  <p className="text-sm font-semibold">{t('home.offsite.title')}</p>
-                  <p className="text-sm text-muted">{t('home.offsite.body')}</p>
-                  <div className={`grid gap-2 ${offsite.length > 1 ? 'grid-cols-2' : ''}`}>
-                    {offsite.map((k) => (
-                      <Button key={k} variant="secondary" onClick={() => { setChoosing(false); onRequest(k); }}>{t(`requests.type.${k}`)}</Button>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-              {away && late && !remote ? (
-                <>
-                  <Button
-                    variant="secondary"
-                    className="min-h-14"
-                    onClick={() => {
-                      setChoosing(false);
-                      // Not clocked in yet: correct the clock-in. Already clocked in: correct the clock-out.
-                      if (next === 'clock_in') onRequest('missed_clock_in', undefined, { only: 'in', date: overview.shift?.workDate });
-                      else if (record) onRequest('correction', record, { only: 'out' });
-                    }}
-                  >
-                    {t(next === 'clock_in' ? 'attendance.choose.forgotIn' : 'attendance.choose.forgotOut')}
-                  </Button>
-                  <p className="px-1 text-sm text-muted">{t('attendance.choose.note')}</p>
-                </>
-              ) : null}
-              <button type="button" className="pressable min-h-11 text-sm text-muted" onClick={() => setChoosing(false)}>{t('common.back')}</button>
-            </section>
-          ) : (
-            <>
-              <Button className="min-h-16 text-lg" onClick={() => setChoosing(true)}>
-                {t(next === 'clock_in' ? 'attendance.clockIn' : 'attendance.clockOut')}
-              </Button>
-              <p className="text-center text-sm text-muted">
-                {remote ? t('home.remoteReady') : t(noScan ? 'attendance.noScanHint' : 'attendance.scanHint')}
-              </p>
-            </>
-          )}
-        </div>
-      ) : null}
     </>
   );
 }
@@ -249,11 +249,15 @@ function Field({ label, value, wide }: { label: string; value: string; wide?: bo
   );
 }
 
+function Chip({ children }: { children: React.ReactNode }) {
+  return <span className="rounded-full bg-warning-pale px-2.5 py-0.5 text-xs font-semibold text-warning">{children}</span>;
+}
+
 function TimeBox({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl bg-pale px-3 py-2">
+    <div className="flex items-baseline justify-between gap-2 rounded-xl bg-pale px-3 py-1.5">
       <p className="text-sm text-muted">{label}</p>
-      <p className="text-2xl font-semibold tabular-nums">{value}</p>
+      <p className="text-lg font-semibold tabular-nums">{value}</p>
     </div>
   );
 }
