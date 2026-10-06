@@ -7,6 +7,7 @@ import { checkLocation, type LocationReading } from './geo';
 import { ipAllowed } from './ip';
 import { expectedHours } from './leave';
 import { earlyLeaveMinutes, lateMinutes } from './timing';
+import { remoteCover } from '@/lib/requests';
 
 export type ClockAction = 'clock_in' | 'clock_out';
 
@@ -18,6 +19,11 @@ export type ClockInput = {
   qrPublicId: string | null;
   /** Without a scan: the branch to clock at. Accepted only where the branch does not require the QR. */
   branchId?: string | null;
+  /**
+   * Away from the branch with an approved out-of-office or business trip: the branch is
+   * named directly and its QR, network and location checks do not apply.
+   */
+  remote?: boolean;
   /** Generated once per tap by the client; retries reuse it. */
   idempotencyKey: string;
   /** Determined by the server from trusted infrastructure headers. Never client supplied. */
@@ -63,6 +69,7 @@ const SUSPICIOUS: ReadonlySet<ErrorCode> = new Set([
   'QR_UNKNOWN',
   'QR_REVOKED',
   'QR_REQUIRED',
+  'REMOTE_NOT_APPROVED',
   'BRANCH_NOT_AUTHORIZED',
   'IP_MISSING',
   'IP_NOT_ALLOWED',
@@ -245,7 +252,14 @@ export async function clock(db: Db, input: ClockInput): Promise<ClockResult> {
     if (!branches[0]) return reject([...failures, input.qrPublicId !== null ? 'QR_UNKNOWN' : 'BRANCH_NOT_AUTHORIZED']);
     branch = branches[0];
     if (branch.qr_status !== 'active') failures.push('QR_REVOKED');
-    if (input.qrPublicId === null && branch.require_qr) failures.push('QR_REQUIRED');
+    let remoteRequestId: string | null = null;
+    if (input.remote) {
+      const cover = await remoteCover(tx, emp.id, now, branch.timezone);
+      if (cover) remoteRequestId = cover.id;
+      else failures.push('REMOTE_NOT_APPROVED');
+    } else if (input.qrPublicId === null && branch.require_qr) {
+      failures.push('QR_REQUIRED');
+    }
     if (branch.status !== 'active') failures.push('BRANCH_INACTIVE');
 
     const assigned = await tx.query(
@@ -254,7 +268,7 @@ export async function clock(db: Db, input: ClockInput): Promise<ClockResult> {
     );
     if (!assigned.length) failures.push('BRANCH_NOT_AUTHORIZED');
 
-    if (branch.require_ip) {
+    if (branch.require_ip && !input.remote) {
       if (!input.sourceIp) {
         failures.push('IP_MISSING');
       } else {
@@ -266,7 +280,7 @@ export async function clock(db: Db, input: ClockInput): Promise<ClockResult> {
       }
     }
 
-    if (branch.require_gps) {
+    if (branch.require_gps && !input.remote) {
       const geo = checkLocation(
         input.location,
         {
@@ -379,15 +393,15 @@ export async function clock(db: Db, input: ClockInput): Promise<ClockResult> {
       row = updated[0];
     }
 
-    const loc = branch.require_gps ? input.location : null;
+    const loc = branch.require_gps && !input.remote ? input.location : null;
     await tx.query(
       `insert into attendance_events (record_id, employee_id, branch_id, session_id, action, occurred_at,
-         idempotency_key, qr_public_id, source_ip, latitude, longitude, accuracy_m, distance_m, created_at)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $6)`,
+         idempotency_key, qr_public_id, source_ip, latitude, longitude, accuracy_m, distance_m, created_at, remote_request_id)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $6, $14)`,
       [
         row.id, emp.id, branch.id, input.sessionId, input.action, now, input.idempotencyKey,
         input.qrPublicId, input.sourceIp, loc?.latitude ?? null, loc?.longitude ?? null,
-        loc?.accuracyM ?? null, distanceM,
+        loc?.accuracyM ?? null, distanceM, remoteRequestId,
       ],
     );
     await tx.query(

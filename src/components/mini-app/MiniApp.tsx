@@ -9,13 +9,14 @@ import { Brand } from '@/components/Brand';
 import { NavIcon } from '@/components/NavIcon';
 import { ClockFlow } from './ClockFlow';
 import { EventPopup } from './Feed';
-import { History } from './History';
 import { Home, type Me } from './Home';
 import { I18nProvider, useI18n } from './i18n-context';
 import { Notifications } from './Notifications';
 import { PinPad } from './PinPad';
 import { RequestForm, type ClockFocus, type RecordRef, type RequestKind } from './RequestForm';
+import { Reports } from './Reports';
 import { Requests } from './Requests';
+import { Settings } from './Settings';
 import { Button, Header, LanguageSwitch, Notice, Screen, Spinner } from './ui';
 
 type Phase =
@@ -26,10 +27,10 @@ type Phase =
   | { name: 'pin_required' }
   | { name: 'ready'; me: Me; tab: Tab }
   | { name: 'request'; me: Me; back: Tab; kind: RequestKind; record?: RecordRef; focus?: ClockFocus }
-  | { name: 'clocking'; me: Me; action: 'clock_in' | 'clock_out'; branchId?: string }
+  | { name: 'clocking'; me: Me; action: 'clock_in' | 'clock_out'; branchId?: string; remote?: boolean }
   | { name: 'error'; message: string };
 
-type Tab = 'home' | 'history' | 'requests' | 'inbox';
+type Tab = 'home' | 'history' | 'requests' | 'inbox' | 'settings';
 
 type AuthResponse = { state: 'not_enrolled' | 'pin_setup' | 'pin_required' | 'ready'; token?: string };
 type MeResponse =
@@ -253,11 +254,24 @@ function Flow() {
           {error ? <Notice tone="danger">{error}</Notice> : null}
           {tab === 'home' ? <Home
               me={me}
-              onClock={(action, branchId) => setPhase({ name: 'clocking', me, action, branchId })}
+              onClock={(action, branchId, remote) => setPhase({ name: 'clocking', me, action, branchId, remote })}
               onRequest={(kind, record, focus) => setPhase({ name: 'request', me, back: 'home', kind, record, focus })}
+              onReports={() => go('history')}
             /> : null}
-          {tab === 'history' ? <History onRequest={(kind, record) => setPhase({ name: 'request', me, back: 'history', kind, record })} /> : null}
-          {tab === 'requests' ? <Requests onNew={(kind) => setPhase({ name: 'request', me, back: 'requests', kind })} /> : null}
+          {tab === 'history' ? <Reports onRequest={(kind, record, focus) => setPhase({ name: 'request', me, back: 'history', kind, record, focus })} /> : null}
+          {tab === 'requests' ? (
+            <Requests
+              types={me.profile.requestTypes}
+              onNew={(kind, record, focus) => setPhase({ name: 'request', me, back: 'requests', kind, record, focus })}
+            />
+          ) : null}
+          {tab === 'settings' ? (
+            <Settings
+              clockInReminders={me.profile.clockInReminders}
+              clockOutReminder={me.profile.clockOutReminder}
+              onSaved={(prefs) => setPhase((p) => (p.name === 'ready' ? { ...p, me: { ...p.me, profile: { ...p.me.profile, ...prefs } } } : p))}
+            />
+          ) : null}
           {tab === 'inbox' ? (
             <Notifications
               notifyTelegram={me.profile.notifyTelegram}
@@ -289,6 +303,7 @@ function Flow() {
         <ClockFlow
           action={phase.action}
           branchId={phase.branchId}
+          remote={phase.remote}
           onDone={(changed) => {
             // Show the previous data immediately, then replace it with what the server has.
             setPhase({ name: 'ready', me: phase.me, tab: 'home' });
@@ -302,7 +317,7 @@ function Flow() {
 function TabBar({ tab, unread, onChange }: { tab: Tab; unread: number; onChange(tab: Tab): void }) {
   const { t, num } = useI18n();
   const items: [Tab, string][] = [
-    ['home', t('tab.home')], ['history', t('tab.history')], ['requests', t('tab.requests')], ['inbox', t('tab.inbox')],
+    ['home', t('tab.home')], ['history', t('tab.history')], ['requests', t('tab.requests')], ['inbox', t('tab.inbox')], ['settings', t('tab.settings')],
   ];
   return (
     <>
@@ -313,7 +328,7 @@ function TabBar({ tab, unread, onChange }: { tab: Tab; unread: number; onChange(
         aria-label={t('portal.nav')}
         className="fixed inset-x-0 bottom-0 z-10 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur"
       >
-        <ul className="mx-auto grid max-w-md grid-cols-4">
+        <ul className="mx-auto grid max-w-md grid-cols-5">
           {items.map(([key, label]) => (
             <li key={key}>
               <button
@@ -326,7 +341,7 @@ function TabBar({ tab, unread, onChange }: { tab: Tab; unread: number; onChange(
               >
                 {/* The active tab's icon sits in a light-blue pill; the label stays dark for contrast. */}
                 <span className={`relative rounded-full px-4 py-0.5 ${tab === key ? 'bg-pale text-primary-strong' : ''}`}>
-                  <NavIcon name={key} className="size-6" />
+                  <NavIcon name={key === 'history' ? 'reports' : key} className="size-6" />
                   {key === 'inbox' && unread > 0 ? (
                     <span
                       className="absolute -top-1 left-7 min-w-5 rounded-full bg-danger px-1 text-center text-[11px] leading-5 font-semibold text-white"

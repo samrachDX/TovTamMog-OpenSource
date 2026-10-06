@@ -10,15 +10,29 @@ export type OrgSettings = {
   nightShifts: boolean;
   /** Days a phone stays signed in after the PIN; 0 asks for the PIN every time the Mini App opens. */
   pinRememberDays: number;
+  /** Request kinds staff can send from the Mini App; corrections are always available. */
+  requestTypes: OptionalRequestType[];
 };
 
+/** Request kinds an organization can switch on or off. */
+export const OPTIONAL_REQUEST_TYPES = ['leave', 'absence', 'overtime', 'out_of_office', 'business_trip', 'shift_swap'] as const;
+export type OptionalRequestType = (typeof OPTIONAL_REQUEST_TYPES)[number];
+
 export async function getSettings(db: Db, orgId: string): Promise<OrgSettings> {
-  const rows = await db.query<OrgSettings>(
-    `select night_shifts_enabled as "nightShifts", pin_remember_days as "pinRememberDays" from organizations where id = $1`,
+  const rows = await db.query<Omit<OrgSettings, 'requestTypes'> & { disabled: string[] }>(
+    `select night_shifts_enabled as "nightShifts", pin_remember_days as "pinRememberDays", disabled_request_types as disabled
+     from organizations where id = $1`,
     [orgId],
   );
   if (!rows[0]) throw new AppError('NOT_FOUND');
-  return rows[0];
+  const { disabled, ...rest } = rows[0];
+  return { ...rest, requestTypes: OPTIONAL_REQUEST_TYPES.filter((t) => !disabled.includes(t)) };
+}
+
+/** Throws unless staff may send this kind of request. */
+export async function requireRequestType(db: Db, orgId: string, type: string): Promise<void> {
+  if (!(OPTIONAL_REQUEST_TYPES as readonly string[]).includes(type)) return;
+  if (!(await getSettings(db, orgId)).requestTypes.includes(type as OptionalRequestType)) throw new AppError('REQUEST_TYPE_OFF');
 }
 
 /** Throws unless the organization allows overnight times. */
@@ -34,12 +48,13 @@ export async function updateSettings(db: Db, actor: Actor, input: Input): Promis
     const next: OrgSettings = {
       nightShifts: input.nightShifts === undefined ? before.nightShifts : bool(input, 'nightShifts'),
       pinRememberDays: input.pinRememberDays === undefined ? before.pinRememberDays : int(input, 'pinRememberDays', 0, 30),
+      requestTypes: input.requestTypes === undefined ? before.requestTypes : requestTypes(input.requestTypes),
     };
     await tx.query(
-      `update organizations set night_shifts_enabled = $2, pin_remember_days = $3, updated_at = $4 where id = $1`,
-      [actor.orgId, next.nightShifts, next.pinRememberDays, actor.now ?? new Date()],
+      `update organizations set night_shifts_enabled = $2, pin_remember_days = $3, disabled_request_types = $4, updated_at = $5 where id = $1`,
+      [actor.orgId, next.nightShifts, next.pinRememberDays, OPTIONAL_REQUEST_TYPES.filter((t) => !next.requestTypes.includes(t)), actor.now ?? new Date()],
     );
-    const changed = (Object.keys(next) as (keyof OrgSettings)[]).filter((k) => next[k] !== before[k]);
+    const changed = (Object.keys(next) as (keyof OrgSettings)[]).filter((k) => String(next[k]) !== String(before[k]));
     if (changed.length) {
       await recordAudit(tx, {
         orgId: actor.orgId, actorEmployeeId: actor.employeeId, action: 'organization.settings.update', entityType: 'organization',
@@ -49,4 +64,11 @@ export async function updateSettings(db: Db, actor: Actor, input: Input): Promis
     }
     return next;
   });
+}
+
+function requestTypes(value: unknown): OptionalRequestType[] {
+  if (!Array.isArray(value) || value.some((v) => !(OPTIONAL_REQUEST_TYPES as readonly unknown[]).includes(v))) {
+    throw new AppError('VALIDATION', { field: 'requestTypes' });
+  }
+  return OPTIONAL_REQUEST_TYPES.filter((t) => value.includes(t));
 }

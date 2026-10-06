@@ -263,8 +263,8 @@ describe('schedule', () => {
     const night = { branchId: f.branchId, nameKm: 'វេនយប់', nameEn: 'Night', startTime: '22:00', endTime: '06:00' };
     await expect(saveTemplate(db, manager, night)).rejects.toThrow('NIGHT_SHIFTS_OFF');
     await expect(updateSettings(db, manager, { nightShifts: true })).rejects.toThrow('FORBIDDEN');
-    expect(await getSettings(db, f.orgId)).toEqual({ nightShifts: false, pinRememberDays: 7 });
-    expect(await updateSettings(db, admin, { nightShifts: true })).toEqual({ nightShifts: true, pinRememberDays: 7 });
+    expect(await getSettings(db, f.orgId)).toMatchObject({ nightShifts: false, pinRememberDays: 7 });
+    expect(await updateSettings(db, admin, { nightShifts: true })).toMatchObject({ nightShifts: true, pinRememberDays: 7 });
     await expect(updateSettings(db, admin, { pinRememberDays: 31 })).rejects.toThrow('VALIDATION');
     expect(await audits('organization.settings.update')).toEqual([
       expect.objectContaining({ before: { nightShifts: false }, after: { nightShifts: true } }),

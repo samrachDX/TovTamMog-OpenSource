@@ -42,6 +42,11 @@ export function POST(req: Request) {
         [body.branchId, session.orgId, session.employeeId],
       );
       if (!b || !b.assigned) throw new AppError('BRANCH_NOT_AUTHORIZED');
+      // Remote clocking (approved out-of-office or trip) needs neither the QR nor a location.
+      if (body.remote === true) {
+        if (b.status !== 'active') throw new AppError('BRANCH_INACTIVE');
+        return json({ branch: { id: b.id, nameKm: b.name_km, nameEn: b.name_en }, requireGps: false });
+      }
       if (b.require_qr) throw new AppError('QR_REQUIRED');
     }
     if (b.qr_status !== 'active') throw new AppError('QR_REVOKED');

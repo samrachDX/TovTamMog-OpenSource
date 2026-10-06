@@ -1,11 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { api } from '@/lib/client/api';
 import { localHour, type MessageKey } from '@/lib/i18n';
 import { useI18n } from './i18n-context';
 import { Avatar } from '@/components/Avatar';
 import { LottieAnimation } from '@/components/LottieAnimation';
+import { getPosition } from './ClockFlow';
 import { FeedSection, type Feed } from './Feed';
+import { MonthSummary } from './Reports';
 import type { ClockFocus, RecordRef, RequestKind } from './RequestForm';
 import { Button, LanguageSwitch, Notice } from './ui';
 
@@ -18,6 +21,9 @@ export type Me = {
     category: { km: string; en: string };
     branches: { id: string; nameKm: string; nameEn: string; isPrimary: boolean; requireQr: boolean }[];
     nightShifts: boolean;
+    requestTypes: ('leave' | 'absence' | 'overtime' | 'out_of_office' | 'business_trip' | 'shift_swap')[];
+    clockInReminders: number[];
+    clockOutReminder: number | null;
     notifyTelegram: boolean;
     photoVersion: string | null;
   };
@@ -36,6 +42,11 @@ export type Me = {
       earlyLeaveMinutes: number;
     } | null;
     correctionPending: boolean;
+    /** An approved out-of-office or business trip covering now. */
+    remote: {
+      id: string; type: 'out_of_office' | 'business_trip';
+      startDate: string; endDate: string | null; startTime: string | null; endTime: string | null;
+    } | null;
   };
 };
 
@@ -52,11 +63,12 @@ const STATE_TONE: Record<Me['overview']['state'], string> = {
   under_review: 'bg-warning-pale text-warning',
 };
 
-export function Home({ me, onClock, onRequest }: {
-  me: Me; onClock(action: 'clock_in' | 'clock_out', branchId?: string): void; onRequest(kind: RequestKind, record?: RecordRef, focus?: ClockFocus): void;
+export function Home({ me, onClock, onRequest, onReports }: {
+  me: Me; onClock(action: 'clock_in' | 'clock_out', branchId?: string, remote?: boolean): void;
+  onRequest(kind: RequestKind, record?: RecordRef, focus?: ClockFocus): void; onReports(): void;
 }) {
   const [choosing, setChoosing] = useState(false);
-  const { t, locale, timeZone, time, longDate } = useI18n();
+  const { t, locale, timeZone, time, longDate, num, day } = useI18n();
   const { profile, overview } = me;
   const km = locale === 'km-KH';
   const pick = (kmText: string, enText: string | null) => (km ? kmText : enText || kmText);
@@ -72,6 +84,16 @@ export function Home({ me, onClock, onRequest }: {
   const { record, shift } = overview;
   // This branch lets staff clock from the button without scanning its QR code.
   const noScan = !!branch && !branch.requireQr;
+  const next = overview.nextAction;
+  const { remote } = overview;
+  // Checked only once they tap Clock in, so opening Home never asks for the location.
+  const { range, recheck } = useRange(choosing && next && branch ? branch.id : null);
+  const away = range?.status === 'out' || range?.status === 'unknown';
+  // The "I forgot" correction is for someone who is no longer at the branch and is already late:
+  // past the shift start for a clock-in, past the shift end for a clock-out.
+  const due = next === 'clock_in' ? shift?.startAt : shift?.endAt;
+  const late = !due || now.getTime() > new Date(due).getTime();
+  const offsite = (['out_of_office', 'business_trip'] as const).filter((k) => profile.requestTypes.includes(k));
 
   return (
     <>
@@ -140,40 +162,76 @@ export function Home({ me, onClock, onRequest }: {
 
       <FeedSection feed={me.feed} />
 
-      {overview.nextAction ? (
+      <MonthSummary onOpen={onReports} />
+
+      {next ? (
         <div className="mt-auto flex flex-col gap-2">
           {choosing ? (
-            // Scanning is the normal way; someone who forgot and is no longer at the branch sends the real time instead.
-            <section aria-label={t(overview.nextAction === 'clock_in' ? 'attendance.clockIn' : 'attendance.clockOut')} className="flex flex-col gap-2 rounded-2xl border border-line p-3">
+            // Scanning is the normal way. Away from the branch: clock remotely under an approved
+            // out-of-office or trip, ask for one, or (already late) send the real time as a correction.
+            <section aria-label={t(next === 'clock_in' ? 'attendance.clockIn' : 'attendance.clockOut')} className="flex flex-col gap-2 rounded-2xl border border-line p-3">
+              {range ? <RangeLine range={range} branch={branch ? pick(branch.nameKm, branch.nameEn) : ''} onRecheck={recheck} /> : null}
+              {remote && branch ? (
+                <>
+                  <Button className="min-h-14" onClick={() => { setChoosing(false); onClock(next, branch.id, true); }}>
+                    {t(next === 'clock_in' ? 'attendance.remoteIn' : 'attendance.remoteOut')}
+                  </Button>
+                  <p className="px-1 text-sm text-success">
+                    {t('home.remoteCover', {
+                      type: t(`requests.type.${remote.type}`),
+                      period: remote.type === 'out_of_office'
+                        ? `${num(remote.startTime ?? '')}–${num(remote.endTime ?? '')}`
+                        : remote.endDate && remote.endDate !== remote.startDate ? `${day(remote.startDate)} – ${day(remote.endDate)}` : day(remote.startDate),
+                    })}
+                  </p>
+                </>
+              ) : null}
               {noScan ? (
-                <Button className="min-h-14" onClick={() => { setChoosing(false); onClock(overview.nextAction!, branch.id); }}>
-                  {t(overview.nextAction === 'clock_in' ? 'attendance.choose.nowIn' : 'attendance.choose.nowOut')}
+                <Button variant={remote ? 'secondary' : undefined} className="min-h-14" onClick={() => { setChoosing(false); onClock(next, branch.id); }}>
+                  {t(next === 'clock_in' ? 'attendance.choose.nowIn' : 'attendance.choose.nowOut')}
                 </Button>
               ) : null}
-              <Button variant={noScan ? 'secondary' : undefined} className="min-h-14" onClick={() => { setChoosing(false); onClock(overview.nextAction!); }}>
+              <Button variant={noScan || remote ? 'secondary' : undefined} className="min-h-14" onClick={() => { setChoosing(false); onClock(next); }}>
                 {t('attendance.choose.scan')}
               </Button>
-              <Button
-                variant="secondary"
-                className="min-h-14"
-                onClick={() => {
-                  setChoosing(false);
-                  // Not clocked in yet: correct the clock-in. Already clocked in: correct the clock-out.
-                  if (overview.nextAction === 'clock_in') onRequest('missed_clock_in', undefined, { only: 'in', date: overview.shift?.workDate });
-                  else if (record) onRequest('correction', record, { only: 'out' });
-                }}
-              >
-                {t(overview.nextAction === 'clock_in' ? 'attendance.choose.forgotIn' : 'attendance.choose.forgotOut')}
-              </Button>
-              <p className="px-1 text-sm text-muted">{t('attendance.choose.note')}</p>
+              {away && !remote && offsite.length ? (
+                <div className="flex flex-col gap-2 rounded-xl bg-pale p-3">
+                  <p className="text-sm font-semibold">{t('home.offsite.title')}</p>
+                  <p className="text-sm text-muted">{t('home.offsite.body')}</p>
+                  <div className={`grid gap-2 ${offsite.length > 1 ? 'grid-cols-2' : ''}`}>
+                    {offsite.map((k) => (
+                      <Button key={k} variant="secondary" onClick={() => { setChoosing(false); onRequest(k); }}>{t(`requests.type.${k}`)}</Button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {away && late && !remote ? (
+                <>
+                  <Button
+                    variant="secondary"
+                    className="min-h-14"
+                    onClick={() => {
+                      setChoosing(false);
+                      // Not clocked in yet: correct the clock-in. Already clocked in: correct the clock-out.
+                      if (next === 'clock_in') onRequest('missed_clock_in', undefined, { only: 'in', date: overview.shift?.workDate });
+                      else if (record) onRequest('correction', record, { only: 'out' });
+                    }}
+                  >
+                    {t(next === 'clock_in' ? 'attendance.choose.forgotIn' : 'attendance.choose.forgotOut')}
+                  </Button>
+                  <p className="px-1 text-sm text-muted">{t('attendance.choose.note')}</p>
+                </>
+              ) : null}
               <button type="button" className="pressable min-h-11 text-sm text-muted" onClick={() => setChoosing(false)}>{t('common.back')}</button>
             </section>
           ) : (
             <>
               <Button className="min-h-16 text-lg" onClick={() => setChoosing(true)}>
-                {t(overview.nextAction === 'clock_in' ? 'attendance.clockIn' : 'attendance.clockOut')}
+                {t(next === 'clock_in' ? 'attendance.clockIn' : 'attendance.clockOut')}
               </Button>
-              <p className="text-center text-sm text-muted">{t(noScan ? 'attendance.noScanHint' : 'attendance.scanHint')}</p>
+              <p className="text-center text-sm text-muted">
+                {remote ? t('home.remoteReady') : t(noScan ? 'attendance.noScanHint' : 'attendance.scanHint')}
+              </p>
             </>
           )}
         </div>
@@ -196,6 +254,68 @@ function TimeBox({ label, value }: { label: string; value: string }) {
     <div className="rounded-xl bg-pale px-3 py-2">
       <p className="text-sm text-muted">{label}</p>
       <p className="text-2xl font-semibold tabular-nums">{value}</p>
+    </div>
+  );
+}
+
+type Range =
+  | { status: 'checking' }
+  | { status: 'in' | 'out'; gpsOk: boolean; ipOk: boolean; distanceM: number | null }
+  | { status: 'unknown' };
+
+/**
+ * Whether clocking at the branch would pass its location and network checks right now.
+ * Advisory only: the clock itself checks everything again. Null while not asked.
+ */
+function useRange(branchId: string | null) {
+  const { locale } = useI18n();
+  const [result, setResult] = useState<{ key: string; range: Range } | null>(null);
+  const [tick, setTick] = useState(0);
+  const key = `${branchId}|${tick}`;
+  useEffect(() => {
+    if (!branchId) return;
+    let live = true;
+    type Res = { inRange: boolean; gpsOk: boolean; ipOk: boolean; distanceM: number | null; requireGps: boolean };
+    const settle = (r: Res) => {
+      if (live) setResult({ key, range: { status: r.inRange ? 'in' : 'out', gpsOk: r.gpsOk, ipOk: r.ipOk, distanceM: r.distanceM } });
+    };
+    (async () => {
+      try {
+        const first = await api<Res>('/api/attendance/range', { body: { branchId }, locale });
+        if (!first.requireGps || !first.ipOk) return settle(first);
+        const location = await getPosition();
+        settle(await api<Res>('/api/attendance/range', { body: { branchId, location }, locale }));
+      } catch {
+        if (live) setResult({ key, range: { status: 'unknown' } });
+      }
+    })();
+    return () => { live = false; };
+    // The language does not change the answer.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  if (!branchId) return { range: null, recheck: () => {} };
+  return { range: result?.key === key ? result.range : ({ status: 'checking' } as Range), recheck: () => setTick((n) => n + 1) };
+}
+
+function RangeLine({ range, branch, onRecheck }: { range: Range; branch: string; onRecheck(): void }) {
+  const { t, num } = useI18n();
+  if (range.status === 'checking') return <p role="status" className="px-1 text-sm text-muted">{t('home.range.checking')}</p>;
+  const text = range.status === 'in'
+    ? t('home.range.in', { branch })
+    : range.status === 'unknown'
+      ? t('home.range.unknown')
+      : !range.ipOk
+        ? t('home.range.network', { branch })
+        : range.distanceM !== null
+          ? t('home.range.far', { branch, distance: num(range.distanceM >= 1000 ? `${(range.distanceM / 1000).toFixed(1)} km` : `${range.distanceM} m`) })
+          : t('home.range.out', { branch });
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-sm">
+      <span aria-hidden="true" className={`size-2.5 shrink-0 rounded-full ${range.status === 'in' ? 'bg-success' : 'bg-warning'}`} />
+      <span role="status" className="min-w-0 flex-1">{text}</span>
+      {range.status !== 'in' ? (
+        <button type="button" className="pressable min-h-9 font-semibold text-primary-strong underline" onClick={onRecheck}>{t('home.range.again')}</button>
+      ) : null}
     </div>
   );
 }

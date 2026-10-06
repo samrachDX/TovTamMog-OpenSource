@@ -43,6 +43,7 @@ export function POST(req: Request) {
       action: body.action,
       qrPublicId: qr,
       branchId,
+      remote: qr === null && body.remote === true,
       idempotencyKey: body.idempotencyKey,
       sourceIp: clientIp(req),
       location: parseLocation(body.location, now),

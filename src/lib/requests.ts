@@ -1,22 +1,31 @@
 import type { Db } from '@/lib/db/types';
 import { AppError } from '@/lib/errors';
 import { recordAudit } from '@/lib/audit';
-import { approvers, branchRecipients, notify } from '@/lib/notifications';
+import { approvers, branchRecipients, dmy, notify } from '@/lib/notifications';
 import { t, type MessageKey } from '@/lib/i18n';
 import { can } from '@/lib/auth/permissions';
 import { hitRateLimit } from '@/lib/auth/rate-limit';
 import { expectedHours, recomputeLateness } from '@/lib/attendance/leave';
 import { sniffContentType } from '@/lib/admin/files';
-import { requireNightShifts } from '@/lib/admin/settings';
+import { requireNightShifts, requireRequestType } from '@/lib/admin/settings';
 import { earlyLeaveMinutes, lateMinutes } from '@/lib/attendance/timing';
 import { DATE, TIME, date, oneOf, optText, optUuid, paging, requireCan, scopeOf, text, time, uuid, type Actor } from '@/lib/admin/actor';
 
 type Input = Record<string, unknown>;
 
-export const REQUEST_TYPES = ['leave', 'absence', 'late', 'missed_clock_out', 'correction', 'overtime', 'missed_clock_in'] as const;
+export const REQUEST_TYPES = [
+  'leave', 'absence', 'late', 'missed_clock_out', 'correction', 'overtime', 'missed_clock_in',
+  'out_of_office', 'business_trip', 'shift_swap',
+] as const;
+/** An approved one of these lets the person clock in and out remotely while it lasts. */
+export const REMOTE_TYPES: readonly string[] = ['out_of_office', 'business_trip'];
 /** Types whose approval changes or creates an attendance record; they also need attendance.approve. */
 const CHANGES_RECORD: readonly string[] = ['missed_clock_out', 'correction', 'missed_clock_in'];
 const MISSED_CLOCK_IN_WINDOW_DAYS = 31;
+/** Out-of-office and trips can be asked for up to a month back and two months ahead. */
+const REMOTE_PAST_DAYS = 31;
+const REMOTE_FUTURE_DAYS = 62;
+const MAX_TRIP_DAYS = 60;
 export type RequestType = (typeof REQUEST_TYPES)[number];
 export type RequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
@@ -141,11 +150,98 @@ async function existingDayRecord(db: Db, employeeId: string, workDate: string, s
   return rows[0];
 }
 
+type SwapShift = { id: string; employee_id: string; branch_id: string; work_date: string; start_at: Date; end_at: Date };
+
+/**
+ * A swap trades the requester's shift for a colleague's at the same branch. Both must be
+ * published, still ahead, without attendance, and the trade must not leave either person
+ * with two shifts at once.
+ */
+async function checkSwap(db: Db, employeeId: string, mineId: string, theirsId: string, now: Date, lock = false) {
+  const rows = await db.query<SwapShift>(
+    `select id, employee_id, branch_id, work_date::text as work_date, start_at, end_at from shift_assignments
+     where id = any($1::uuid[]) and status = 'published' ${lock ? 'for update' : ''}`,
+    [[mineId, theirsId]],
+  );
+  const mine = rows.find((r) => r.id === mineId);
+  const theirs = rows.find((r) => r.id === theirsId);
+  if (!mine || mine.employee_id !== employeeId || !theirs || theirs.employee_id === employeeId) throw new AppError('SWAP_NOT_ALLOWED');
+  if (mine.branch_id !== theirs.branch_id || mine.start_at <= now || theirs.start_at <= now) throw new AppError('SWAP_NOT_ALLOWED');
+  const worked = await db.query(`select 1 from attendance_records where shift_assignment_id = any($1::uuid[]) limit 1`, [[mineId, theirsId]]);
+  if (worked.length) throw new AppError('SWAP_NOT_ALLOWED');
+  const colleague = await db.query(
+    `select 1 from employees e join employee_branches eb on eb.employee_id = e.id and eb.branch_id = $2
+     where e.id = $1 and e.status = 'active'`,
+    [theirs.employee_id, mine.branch_id],
+  );
+  if (!colleague.length) throw new AppError('SWAP_NOT_ALLOWED');
+  // After the trade: I work their shift, they work mine. Neither may overlap anything else they have.
+  const clash = await db.query(
+    `select 1 from shift_assignments s
+     where s.status <> 'cancelled' and s.id <> all($1::uuid[])
+       and ((s.employee_id = $2 and tstzrange(s.start_at, s.end_at) && tstzrange($4::timestamptz, $5::timestamptz))
+         or (s.employee_id = $3 and tstzrange(s.start_at, s.end_at) && tstzrange($6::timestamptz, $7::timestamptz)))
+     limit 1`,
+    [[mineId, theirsId], employeeId, theirs.employee_id, theirs.start_at, theirs.end_at, mine.start_at, mine.end_at],
+  );
+  if (clash.length) throw new AppError('SWAP_NOT_ALLOWED');
+  return { mine, theirs };
+}
+
+/** Shifts the employee could offer in a swap, and colleagues' shifts at the same branch they could take. */
+export async function swapOptions(db: Db, employeeId: string, now: Date = new Date()) {
+  const mine = await db.query<{ id: string; branchId: string; workDate: string; startAt: Date; endAt: Date }>(
+    `select s.id, s.branch_id as "branchId", s.work_date::text as "workDate", s.start_at as "startAt", s.end_at as "endAt"
+     from shift_assignments s
+     where s.employee_id = $1 and s.status = 'published' and s.start_at > $2::timestamptz
+       and s.start_at < $2::timestamptz + interval '45 days'
+       and not exists (select 1 from attendance_records r where r.shift_assignment_id = s.id)
+     order by s.start_at limit 60`,
+    [employeeId, now],
+  );
+  const theirs = await db.query(
+    `select s.id, s.branch_id as "branchId", s.work_date::text as "workDate", s.start_at as "startAt", s.end_at as "endAt",
+            e.id as "employeeId", e.employee_code as "employeeCode", e.name_km as "nameKm", e.name_en as "nameEn"
+     from shift_assignments s
+     join employees e on e.id = s.employee_id and e.status = 'active'
+     where s.status = 'published' and s.employee_id <> $1 and s.start_at > $2::timestamptz
+       and s.start_at < $2::timestamptz + interval '45 days'
+       and s.branch_id in (select branch_id from employee_branches where employee_id = $1)
+       and exists (select 1 from employee_branches eb where eb.employee_id = e.id and eb.branch_id = s.branch_id)
+       and not exists (select 1 from attendance_records r where r.shift_assignment_id = s.id)
+     order by s.start_at, e.employee_code limit 300`,
+    [employeeId, now],
+  );
+  return { mine, theirs };
+}
+
+/**
+ * The approved out-of-office or business trip that covers this moment, if any. An
+ * out-of-office counts from an hour before its start to an hour after its end, so
+ * arriving or leaving a little early or late still works.
+ */
+export async function remoteCover(db: Db, employeeId: string, now: Date, timeZone: string) {
+  const rows = await db.query<{ id: string; type: 'out_of_office' | 'business_trip'; start_date: string; end_date: string; start_time: string | null; end_time: string | null }>(
+    `select id, type, start_date::text as start_date, end_date::text as end_date,
+            to_char(start_time, 'HH24:MI') as start_time, to_char(end_time, 'HH24:MI') as end_time
+     from employee_requests
+     where employee_id = $1 and status = 'approved' and type in ('out_of_office', 'business_trip')
+       and (($2::timestamptz at time zone $3)::date between start_date and end_date)
+       and (type = 'business_trip'
+         or $2::timestamptz between ((start_date + start_time) at time zone $3) - interval '1 hour'
+                                and ((start_date + end_time) at time zone $3) + interval '1 hour')
+     order by type = 'out_of_office' desc, created_at desc limit 1`,
+    [employeeId, now, timeZone],
+  );
+  const r = rows[0];
+  return r ? { id: r.id, type: r.type, startDate: r.start_date, endDate: r.end_date, startTime: r.start_time, endTime: r.end_time } : null;
+}
+
 // ---- employee side -----------------------------------------------------------
 
 export async function createRequest(
   db: Db,
-  who: { employeeId: string; orgId: string; now?: Date },
+  who: { employeeId: string; orgId: string; now?: Date; /** HR entering it for the employee: no switch, limit or alerts. */ enteredBy?: string },
   input: Input,
   files: IncomingFile[] = [],
 ): Promise<{ id: string }> {
@@ -153,10 +249,13 @@ export async function createRequest(
   const why = text(input, 'reason', { min: 3, max: 1000 });
   const attachments = checkAttachments(files);
   const now = who.now ?? new Date();
-  // Every request messages the approvers, so one account cannot be used to flood them.
-  for (const [window, limit] of [[3600, 10], [86_400, 30]] as const) {
-    const rl = await hitRateLimit(db, `req:${window}:${who.employeeId}`, limit, window, now);
-    if (!rl.allowed) throw new AppError('RATE_LIMITED');
+  if (!who.enteredBy) {
+    await requireRequestType(db, who.orgId, type);
+    // Every request messages the approvers, so one account cannot be used to flood them.
+    for (const [window, limit] of [[3600, 10], [86_400, 30]] as const) {
+      const rl = await hitRateLimit(db, `req:${window}:${who.employeeId}`, limit, window, now);
+      if (!rl.allowed) throw new AppError('RATE_LIMITED');
+    }
   }
 
   return db.tx(async (tx) => {
@@ -172,6 +271,9 @@ export async function createRequest(
     let startTime: string | null = null;
     let endTime: string | null = null;
     let leaveTypeId: string | null = null;
+    let swapShiftId: string | null = null;
+    let swapWithShiftId: string | null = null;
+    let swapWithEmployeeId: string | null = null;
 
     if (type === 'leave') {
       // Older copies of the Mini App send no type; they get the first one in the list.
@@ -221,6 +323,40 @@ export async function createRequest(
       if (open.some((o) => { const x = overtimeSpan(o.start_time, o.end_time); return x.from < span.to && span.from < x.to; })) {
         throw new AppError('REQUEST_ALREADY_OPEN');
       }
+    } else if (type === 'out_of_office' || type === 'business_trip') {
+      // Away from the branch for work: hours on one day, or whole days on a trip.
+      startDate = date(input, 'startDate');
+      endDate = type === 'business_trip' && input.endDate !== undefined ? date(input, 'endDate') : startDate;
+      if (type === 'out_of_office') {
+        leaveUnit = 'hours';
+        startTime = time(input, 'startTime');
+        endTime = time(input, 'endTime');
+        if (endTime <= startTime) throw new AppError('INVALID_TIME_RANGE');
+      }
+      const today = Date.parse(`${now.toISOString().slice(0, 10)}T00:00:00Z`);
+      const days = (Date.parse(endDate) - Date.parse(startDate)) / 86_400_000;
+      if (days < 0 || days >= MAX_TRIP_DAYS || (today - Date.parse(`${startDate}T00:00:00Z`)) / 86_400_000 > REMOTE_PAST_DAYS
+        || (Date.parse(`${startDate}T00:00:00Z`) - today) / 86_400_000 > REMOTE_FUTURE_DAYS) {
+        throw new AppError('DATE_RANGE_INVALID');
+      }
+      // Two open requests of the same kind may not cover the same time.
+      const clash = await tx.query(
+        `select 1 from employee_requests
+         where employee_id = $1 and type = $2 and status in ('pending', 'approved')
+           and start_date <= $4::date and end_date >= $3::date
+           and ($5::time is null or (start_time < $6::time and end_time > $5::time))
+         limit 1`,
+        [who.employeeId, type, startDate, endDate, startTime, endTime],
+      );
+      if (clash.length) throw new AppError('REQUEST_ALREADY_OPEN');
+    } else if (type === 'shift_swap') {
+      const swap = await checkSwap(tx, who.employeeId, uuid(input, 'swapShiftId'), uuid(input, 'swapWithShiftId'), now);
+      startDate = swap.mine.work_date;
+      endDate = startDate;
+      swapShiftId = swap.mine.id;
+      swapWithShiftId = swap.theirs.id;
+      swapWithEmployeeId = swap.theirs.employee_id;
+      recordBranchId = swap.mine.branch_id;
     } else if (type === 'missed_clock_in') {
       // Forgot to scan: the day's record is created from these times once a manager approves.
       startDate = date(input, 'startDate');
@@ -274,10 +410,10 @@ export async function createRequest(
       const rows = await tx.query<{ id: string }>(
         `insert into employee_requests (org_id, employee_id, type, reason, start_date, end_date, attendance_record_id,
            proposed_clock_in_at, proposed_clock_out_at, previous_record_status, created_at, updated_at,
-           leave_unit, half_day_part, start_time, end_time, leave_type_id)
-         values ($1, $2, $3, $4, $5::date, $6::date, $7, $8, $9, $10, $11, $11, $12, $13, $14::time, $15::time, $16) returning id`,
+           leave_unit, half_day_part, start_time, end_time, leave_type_id, swap_shift_id, swap_with_employee_id, swap_with_shift_id)
+         values ($1, $2, $3, $4, $5::date, $6::date, $7, $8, $9, $10, $11, $11, $12, $13, $14::time, $15::time, $16, $17, $18, $19) returning id`,
         [who.orgId, who.employeeId, type, why, startDate, endDate, recordId, proposedIn, proposedOut, previousStatus, now,
-          leaveUnit, halfDayPart, startTime, endTime, leaveTypeId],
+          leaveUnit, halfDayPart, startTime, endTime, leaveTypeId, swapShiftId, swapWithEmployeeId, swapWithShiftId],
       );
       id = rows[0].id;
     } catch (err) {
@@ -294,17 +430,26 @@ export async function createRequest(
       await tx.query(`update attendance_records set status = 'pending_correction', updated_at = $2 where id = $1`, [recordId, now]);
     }
     await tx.query(`insert into request_events (request_id, actor_employee_id, action, note, created_at) values ($1, $2, 'submitted', $3, $4)`, [
-      id, who.employeeId, why, now,
+      id, who.enteredBy ?? who.employeeId, why, now,
     ]);
+    if (who.enteredBy) return { id };
 
     // Alert everyone who can decide this request, plus anyone the branch added, never the requester.
     // A correction is decided at the record's branch and needs attendance.approve as well.
     const branches = (await tx.query<{ branch_id: string }>(`select branch_id from employee_branches where employee_id = $1`, [who.employeeId])).map((b) => b.branch_id);
     const changesRecord = CHANGES_RECORD.includes(type);
-    const scope = changesRecord && recordBranchId ? [recordBranchId] : branches;
-    const canDecide = await approvers(tx, who.orgId, scope, changesRecord ? ['request.review', 'attendance.approve'] : ['request.review'], [who.employeeId]);
-    const extra = await branchRecipients(tx, branches, [who.employeeId]);
+    const scope = (changesRecord || type === 'shift_swap') && recordBranchId ? [recordBranchId] : branches;
+    const needed = changesRecord ? ['request.review', 'attendance.approve'] : type === 'shift_swap' ? ['request.review', 'schedule.manage'] : ['request.review'];
+    const canDecide = await approvers(tx, who.orgId, scope, needed, [who.employeeId, ...(swapWithEmployeeId ? [swapWithEmployeeId] : [])]);
+    const extra = await branchRecipients(tx, branches, [who.employeeId, ...(swapWithEmployeeId ? [swapWithEmployeeId] : [])]);
     const me = await tx.query<{ name_km: string; name_en: string | null }>(`select name_km, name_en from employees where id = $1`, [who.employeeId]);
+    // The colleague in a swap hears about it too, so nobody is surprised by a changed schedule.
+    if (swapWithEmployeeId) {
+      await notify(tx, who.orgId, [{
+        employeeId: swapWithEmployeeId, kind: 'shift_swap_asked', data: { requestId: id },
+        params: (locale) => ({ name: locale === 'km-KH' ? me[0].name_km : me[0].name_en || me[0].name_km, date: dmy(startDate!) }),
+      }], now);
+    }
     await notify(tx, who.orgId, [...new Set([...canDecide, ...extra])].map((employeeId) => ({
       employeeId, kind: 'request_submitted' as const, data: { requestId: id },
       link: { path: '/hr/requests', label: 'bot.review' as const },
@@ -339,7 +484,14 @@ const REQUEST_SELECT = `
          case when q.type = 'overtime' then (
            select json_build_object('clockInAt', ar.clock_in_at, 'clockOutAt', ar.clock_out_at)
            from attendance_records ar where ar.employee_id = q.employee_id and ar.work_date = q.start_date
-           order by ar.clock_in_at nulls last limit 1) end as "otRecord"
+           order by ar.clock_in_at nulls last limit 1) end as "otRecord",
+         case when q.type = 'shift_swap' then (
+           select json_build_object(
+             'mine', json_build_object('workDate', m.work_date, 'startAt', m.start_at, 'endAt', m.end_at),
+             'theirs', json_build_object('workDate', o.work_date, 'startAt', o.start_at, 'endAt', o.end_at),
+             'with', json_build_object('employeeCode', w.employee_code, 'nameKm', w.name_km, 'nameEn', w.name_en))
+           from shift_assignments m, shift_assignments o, employees w
+           where m.id = q.swap_shift_id and o.id = q.swap_with_shift_id and w.id = q.swap_with_employee_id) end as swap
   from employee_requests q
   join employees e on e.id = q.employee_id
   left join leave_types lt on lt.id = q.leave_type_id
@@ -629,6 +781,27 @@ export async function listRequests(db: Db, actor: Actor, filter: Input = {}) {
   return { items, total: n };
 }
 
+/**
+ * HR records an out-of-office or business trip for someone (for example a trip the company
+ * arranged). It is approved at once, so the person can clock remotely; this works even when
+ * staff cannot send that kind themselves.
+ */
+export async function createRequestFor(db: Db, actor: Actor, input: Input): Promise<{ id: string }> {
+  const employeeId = uuid(input, 'employeeId');
+  oneOf(input, 'type', REMOTE_TYPES);
+  const rows = await db.query<{ org_id: string; branch_id: string | null }>(
+    `select e.org_id, eb.branch_id from employees e left join employee_branches eb on eb.employee_id = e.id where e.id = $1`,
+    [employeeId],
+  );
+  const inScope = rows[0]?.org_id === actor.orgId
+    && (can(actor.grants, 'request.review') || rows.some((r) => r.branch_id && can(actor.grants, 'request.review', r.branch_id)));
+  if (!inScope) throw new AppError('NOT_FOUND');
+  if (employeeId === actor.employeeId) throw new AppError('CANNOT_REVIEW_OWN');
+  const { id } = await createRequest(db, { employeeId, orgId: actor.orgId, now: actor.now, enteredBy: actor.employeeId }, input);
+  await decideRequest(db, actor, id, { decision: 'approved' });
+  return { id };
+}
+
 export async function countPendingRequests(db: Db, actor: Actor): Promise<number> {
   if (!actor.grants.some((g) => g.permission === 'request.review')) return 0;
   const scope = scopeOf(actor, 'request.review');
@@ -668,8 +841,10 @@ export async function decideRequest(db: Db, actor: Actor, id: string, input: Inp
       attendance_record_id: string | null; previous_record_status: string | null;
       proposed_clock_in_at: Date | null; proposed_clock_out_at: Date | null; leave_unit: string; start_date: string | null;
       start_time: string | null; end_time: string | null;
+      swap_shift_id: string | null; swap_with_shift_id: string | null; swap_with_employee_id: string | null;
     }>(
       `select employee_id, org_id, type, status, reason, attendance_record_id, previous_record_status,
+              swap_shift_id, swap_with_shift_id, swap_with_employee_id,
               proposed_clock_in_at, proposed_clock_out_at, leave_unit, start_date::text as start_date,
               to_char(start_time, 'HH24:MI') as start_time, to_char(end_time, 'HH24:MI') as end_time
        from employee_requests where id = $1 for update`,
@@ -690,6 +865,26 @@ export async function decideRequest(db: Db, actor: Actor, id: string, input: Inp
         await createMissedDay(tx, req as typeof req & { start_date: string; proposed_clock_in_at: Date }, target, {
           requestId: id, proposedBy: req.employee_id, approvedBy: actor.employeeId, reason: req.reason, now,
         });
+      }
+    }
+    if (req.type === 'shift_swap') {
+      const [shift] = await tx.query<{ branch_id: string }>(`select branch_id from shift_assignments where id = $1`, [req.swap_shift_id]);
+      requireCan(actor, 'schedule.manage', shift?.branch_id);
+      if (decision === 'approved') {
+        // Checked again now: either shift may have changed while the request waited.
+        const { mine, theirs } = await checkSwap(tx, req.employee_id, req.swap_shift_id!, req.swap_with_shift_id!, now, true);
+        await tx.query(`update shift_assignments set employee_id = $2, updated_at = $3 where id = $1`, [mine.id, theirs.employee_id, now]);
+        await tx.query(`update shift_assignments set employee_id = $2, updated_at = $3 where id = $1`, [theirs.id, req.employee_id, now]);
+        await recordAudit(tx, {
+          orgId: actor.orgId, actorEmployeeId: actor.employeeId, action: 'schedule.swap', entityType: 'shift_assignment',
+          entityId: mine.id, branchId: mine.branch_id,
+          before: { [mine.id]: req.employee_id, [theirs.id]: theirs.employee_id },
+          after: { [mine.id]: theirs.employee_id, [theirs.id]: req.employee_id }, reason: req.reason, ip: actor.ip, at: now,
+        });
+        await notify(tx, actor.orgId, [{
+          employeeId: theirs.employee_id, kind: 'shift_swapped', data: { requestId: id },
+          params: { date: dmy(theirs.work_date), other: dmy(mine.work_date) },
+        }], now);
       }
     }
     const changesRecord = req.type === 'missed_clock_out' || req.type === 'correction';

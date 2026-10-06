@@ -20,14 +20,17 @@ export function GET(req: Request) {
   });
 }
 
-/** Saves the employee's own display preferences (language, digits). */
+/** Saves the employee's own preferences (language, digits, alerts and reminders). */
 export function PATCH(req: Request) {
   return handle(req, async () => {
     const session = await sessionFrom(req);
     const body = await readJson(req);
     // Language and digits are harmless before the PIN; switching alerts off is not.
-    if (body.notifyTelegram !== undefined) requirePin(session);
-    await updatePreferences(db, session.employeeId, { locale: body.locale, digits: body.digits, notifyTelegram: body.notifyTelegram });
+    if (body.notifyTelegram !== undefined || body.clockInReminders !== undefined || body.clockOutReminder !== undefined) requirePin(session);
+    await updatePreferences(db, session.employeeId, {
+      locale: body.locale, digits: body.digits, notifyTelegram: body.notifyTelegram,
+      clockInReminders: body.clockInReminders, clockOutReminder: body.clockOutReminder,
+    });
     return json({ ok: true });
   });
 }

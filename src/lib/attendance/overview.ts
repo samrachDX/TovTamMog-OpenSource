@@ -1,6 +1,7 @@
 import type { Db } from '@/lib/db/types';
 import { DEFAULT_TIMEZONE, localDate } from '@/lib/i18n';
 import { RECORD_COLUMNS, toRecord, type AttendanceRecord } from './engine';
+import { remoteCover } from '@/lib/requests';
 
 export type ShiftSummary = { id: string; branchId: string; workDate: string; startAt: Date; endAt: Date };
 
@@ -12,6 +13,8 @@ export type TodayOverview = {
   nextAction: 'clock_in' | 'clock_out' | null;
   /** A correction for this record is waiting for a decision. */
   correctionPending: boolean;
+  /** An approved out-of-office or business trip covering now: clocking can be done remotely. */
+  remote: Awaited<ReturnType<typeof remoteCover>>;
 };
 
 /**
@@ -49,6 +52,7 @@ export async function getTodayOverview(
     [employeeId, shift?.id ?? null, today],
   );
   const record = rows[0] ? toRecord(rows[0]) : null;
+  const remote = await remoteCover(db, employeeId, now, timeZone);
 
   // A finished record for an earlier shift must not hide a later shift that is still open to clock in.
   const forOtherShift = record && shift && record.status !== 'clocked_in' && record.shiftAssignmentId !== shift.id;
@@ -60,7 +64,7 @@ export async function getTodayOverview(
          and status = 'pending' and start_date = $2::date) as open`,
       [employeeId, shift?.workDate ?? today],
     );
-    return { state: 'not_clocked_in', record: null, shift, nextAction: canStart ? 'clock_in' : null, correctionPending: asked[0]?.open ?? false };
+    return { state: 'not_clocked_in', record: null, shift, nextAction: canStart ? 'clock_in' : null, correctionPending: asked[0]?.open ?? false, remote };
   }
   const pending = await db.query<{ open: boolean }>(
     `select exists (select 1 from employee_requests where attendance_record_id = $1 and status = 'pending'
@@ -74,5 +78,6 @@ export async function getTodayOverview(
     // Without a schedule the engine decides whether another clock-in is allowed.
     nextAction: record.status === 'clocked_in' ? 'clock_out' : record.status === 'completed' && !shift ? 'clock_in' : null,
     correctionPending: pending[0]?.open ?? false,
+    remote,
   };
 }

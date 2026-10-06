@@ -5,7 +5,10 @@ import { api } from '@/lib/client/api';
 import { useI18n } from '@/components/mini-app/i18n-context';
 import { Card, Notice, Check, Field, LoadState, PageHeader, Select, SmallButton, useLoad } from '../ui';
 
-type Settings = { nightShifts: boolean; pinRememberDays: number };
+type RequestType = 'leave' | 'absence' | 'overtime' | 'out_of_office' | 'business_trip' | 'shift_swap';
+type Settings = { nightShifts: boolean; pinRememberDays: number; requestTypes: RequestType[] };
+
+const REQUEST_TYPES: RequestType[] = ['leave', 'absence', 'overtime', 'out_of_office', 'business_trip', 'shift_swap'];
 
 const REMEMBER_DAYS = [0, 1, 3, 7, 14, 30];
 
@@ -27,7 +30,7 @@ function SettingsForm({ initial }: { initial: Settings }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
-  const dirty = form.nightShifts !== initial.nightShifts || form.pinRememberDays !== initial.pinRememberDays;
+  const dirty = JSON.stringify(form) !== JSON.stringify(initial);
 
   const save = async () => {
     setBusy(true);
@@ -59,6 +62,22 @@ function SettingsForm({ initial }: { initial: Settings }) {
             ))}
           </Select>
         </Field>
+      </Card>
+      <Card title={t('settings.requests.title')}>
+        <p className="mb-2 text-sm text-muted">{t('settings.requests.body')}</p>
+        <div className="grid gap-1 sm:grid-cols-2">
+          {REQUEST_TYPES.map((type) => (
+            <Check
+              key={type}
+              label={t(`requests.type.${type}`)}
+              checked={form.requestTypes.includes(type)}
+              onChange={(v) => {
+                setSaved(false);
+                setForm({ ...form, requestTypes: REQUEST_TYPES.filter((x) => (x === type ? v : form.requestTypes.includes(x))) });
+              }}
+            />
+          ))}
+        </div>
       </Card>
       <Card title={t('settings.qr.title')}>
         <p className="text-sm text-muted">{t('settings.qr.body')}</p>

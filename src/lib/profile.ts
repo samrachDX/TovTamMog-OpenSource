@@ -1,6 +1,11 @@
 import type { Db } from '@/lib/db/types';
 import { AppError } from '@/lib/errors';
 import { isLocale, resolveLocale, type Digits, type Locale } from '@/lib/i18n';
+import { OPTIONAL_REQUEST_TYPES, type OptionalRequestType } from '@/lib/admin/settings';
+
+/** Reminder choices offered in the Mini App, in minutes. */
+export const CLOCK_IN_REMINDERS = [5, 10, 15, 30] as const;
+export const CLOCK_OUT_REMINDERS = [0, 5, 10, 15, 30] as const;
 
 export type Profile = {
   employeeCode: string;
@@ -16,6 +21,12 @@ export type Profile = {
   timezone: string;
   /** The organization uses overnight shifts; off hides "next day" fields. */
   nightShifts: boolean;
+  /** Request kinds the organization lets staff send (corrections are always allowed). */
+  requestTypes: OptionalRequestType[];
+  /** Minutes before a shift starts to send a clock-in reminder; empty for none. */
+  clockInReminders: number[];
+  /** Minutes after a shift ends to remind them to clock out; null for none. */
+  clockOutReminder: number | null;
   /** requireQr false: the Clock button can clock at that branch without scanning. */
   branches: { id: string; nameKm: string; nameEn: string; isPrimary: boolean; requireQr: boolean }[];
 };
@@ -25,10 +36,12 @@ export async function getProfile(db: Db, employeeId: string): Promise<Profile> {
     employee_code: string; name_km: string; name_en: string | null; photo_path: string | null;
     locale: string | null; digits: Digits | null; notify_telegram: boolean; photo_version: string | null; cat_km: string; cat_en: string;
     default_locale: string; default_digits: Digits; timezone: string; night_shifts_enabled: boolean;
+    disabled_request_types: string[]; clock_in_reminders: number[]; clock_out_reminder: number | null;
   }>(
     `select e.employee_code, e.name_km, e.name_en, e.photo_path, e.locale, e.digits, e.notify_telegram,
             (select extract(epoch from f.uploaded_at)::bigint::text from employee_files f where f.employee_id = e.id and f.kind = 'photo') as photo_version,
-            c.name_km as cat_km, c.name_en as cat_en, o.default_locale, o.default_digits, o.timezone, o.night_shifts_enabled
+            c.name_km as cat_km, c.name_en as cat_en, o.default_locale, o.default_digits, o.timezone, o.night_shifts_enabled,
+            o.disabled_request_types, e.clock_in_reminders, e.clock_out_reminder
      from employees e
      join organizations o on o.id = e.org_id
      join employee_categories c on c.org_id = e.org_id and c.key = e.category
@@ -58,6 +71,9 @@ export async function getProfile(db: Db, employeeId: string): Promise<Profile> {
     notifyTelegram: e.notify_telegram,
     timezone: primary?.timezone ?? e.timezone,
     nightShifts: e.night_shifts_enabled,
+    requestTypes: OPTIONAL_REQUEST_TYPES.filter((t) => !e.disabled_request_types.includes(t)),
+    clockInReminders: e.clock_in_reminders,
+    clockOutReminder: e.clock_out_reminder,
     branches: branches.map((b) => ({ id: b.id, nameKm: b.name_km, nameEn: b.name_en, isPrimary: b.is_primary, requireQr: b.require_qr })),
   };
 }
@@ -65,7 +81,7 @@ export async function getProfile(db: Db, employeeId: string): Promise<Profile> {
 export async function updatePreferences(
   db: Db,
   employeeId: string,
-  prefs: { locale?: unknown; digits?: unknown; notifyTelegram?: unknown },
+  prefs: { locale?: unknown; digits?: unknown; notifyTelegram?: unknown; clockInReminders?: unknown; clockOutReminder?: unknown },
 ): Promise<void> {
   if (prefs.locale !== undefined) {
     if (!isLocale(prefs.locale)) throw new AppError('BAD_REQUEST');
@@ -78,5 +94,16 @@ export async function updatePreferences(
   if (prefs.notifyTelegram !== undefined) {
     if (typeof prefs.notifyTelegram !== 'boolean') throw new AppError('BAD_REQUEST');
     await db.query(`update employees set notify_telegram = $2, updated_at = now() where id = $1`, [employeeId, prefs.notifyTelegram]);
+  }
+  if (prefs.clockInReminders !== undefined) {
+    const v = prefs.clockInReminders;
+    if (!Array.isArray(v) || v.some((m) => !(CLOCK_IN_REMINDERS as readonly unknown[]).includes(m))) throw new AppError('BAD_REQUEST');
+    const minutes = CLOCK_IN_REMINDERS.filter((m) => v.includes(m));
+    await db.query(`update employees set clock_in_reminders = $2, updated_at = now() where id = $1`, [employeeId, minutes]);
+  }
+  if (prefs.clockOutReminder !== undefined) {
+    const v = prefs.clockOutReminder;
+    if (v !== null && !(CLOCK_OUT_REMINDERS as readonly unknown[]).includes(v)) throw new AppError('BAD_REQUEST');
+    await db.query(`update employees set clock_out_reminder = $2, updated_at = now() where id = $1`, [employeeId, v]);
   }
 }

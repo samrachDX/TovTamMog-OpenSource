@@ -22,7 +22,7 @@ type Step =
 type ClockedRecord = { id: string; workDate: string; clockInAt: string; clockOutAt: string | null };
 
 /** Where the branch comes from: a scanned QR, or (where the branch allows it) the branch itself. */
-type Source = { qr: string } | { branchId: string };
+type Source = { qr: string } | { branchId: string; remote?: true };
 
 type Position = { latitude: number; longitude: number; accuracyM: number; ageMs: number };
 
@@ -49,7 +49,7 @@ function browserPosition(): Promise<Position> {
  * Rejects with 'denied_telegram' when the person refused there, so the screen can offer a way
  * to change it in Telegram's settings.
  */
-function getPosition(): Promise<Position> {
+export function getPosition(): Promise<Position> {
   const tg = telegram();
   const lm = tg?.isVersionAtLeast('8.0') ? tg.LocationManager : undefined;
   if (!lm) return browserPosition();
@@ -79,10 +79,12 @@ function getPosition(): Promise<Position> {
  * has accepted the request. One idempotency key covers the whole attempt, so a retry
  * after a dropped connection cannot create a second record.
  */
-export function ClockFlow({ action, branchId, onDone }: {
+export function ClockFlow({ action, branchId, remote, onDone }: {
   action: Action;
   /** Clock at this branch without scanning; only for a branch that does not require the QR. */
   branchId?: string;
+  /** Clock from wherever they are, under an approved out-of-office or business trip. */
+  remote?: boolean;
   onDone(changed: boolean): void;
 }) {
   const { t, locale, time, errorText } = useI18n();
@@ -168,12 +170,12 @@ export function ClockFlow({ action, branchId, onDone }: {
     if (started.current) return;
     started.current = true;
     if (branchId) {
-      attempt.current = { key: crypto.randomUUID(), source: { branchId } };
+      attempt.current = { key: crypto.randomUUID(), source: remote ? { branchId, remote: true } : { branchId } };
       void submit(attempt.current.source, attempt.current.key);
     } else {
       void scan();
     }
-  }, [scan, submit, branchId]);
+  }, [scan, submit, branchId, remote]);
 
   const title = t(action === 'clock_in' ? 'attendance.clockIn' : 'attendance.clockOut');
 

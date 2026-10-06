@@ -14,7 +14,12 @@ import { Button, Header, Notice } from './ui';
 export type ClockFocus = { only: 'in' | 'out'; date?: string };
 
 export type RecordRef = { id: string; workDate: string; clockInAt: string | null; clockOutAt: string | null };
-export type RequestKind = 'leave' | 'absence' | 'late' | 'missed_clock_out' | 'correction' | 'overtime' | 'missed_clock_in';
+export type RequestKind =
+  | 'leave' | 'absence' | 'late' | 'missed_clock_out' | 'correction' | 'overtime' | 'missed_clock_in'
+  | 'out_of_office' | 'business_trip' | 'shift_swap';
+
+type SwapShift = { id: string; workDate: string; startAt: string; endAt: string };
+type SwapOptions = { mine: SwapShift[]; theirs: (SwapShift & { employeeId: string; employeeCode: string; nameKm: string; nameEn: string | null })[] };
 
 const INPUT = 'min-h-12 w-full rounded-xl border border-line bg-surface px-3';
 
@@ -55,8 +60,11 @@ export function RequestForm({ kind, record, focus, nightShifts = false, onDone }
   const [endDate, setEndDate] = useState(today);
   const [unit, setUnit] = useState<'day' | 'half_day' | 'hours'>('day');
   const [part, setPart] = useState<'morning' | 'afternoon'>('morning');
-  const [fromTime, setFromTime] = useState('08:00');
-  const [toTime, setToTime] = useState('10:00');
+  const [fromTime, setFromTime] = useState(kind === 'out_of_office' ? '09:00' : '08:00');
+  const [toTime, setToTime] = useState(kind === 'out_of_office' ? '12:00' : '10:00');
+  const [swap, setSwap] = useState<SwapOptions | null>(null);
+  const [mineId, setMineId] = useState('');
+  const [theirsId, setTheirsId] = useState('');
   const [otFrom, setOtFrom] = useState('17:00');
   const [otTo, setOtTo] = useState('19:00');
   const [clockIn, setClockIn] = useState('');
@@ -86,6 +94,18 @@ export function RequestForm({ kind, record, focus, nightShifts = false, onDone }
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, locale]);
+
+  // Shift swap: the person's own coming shifts, and colleagues' shifts at the same branches.
+  useEffect(() => {
+    if (kind !== 'shift_swap') return;
+    let live = true;
+    api<SwapOptions>('/api/requests/swap-options', { locale }).then(
+      (d) => { if (live) { setSwap(d); setMineId((cur) => cur || d.mine[0]?.id || ''); } },
+      (err) => { if (live) { setSwap({ mine: [], theirs: [] }); setError(errorText(err)); } },
+    );
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind]);
 
   const leaveType = types?.find((x) => x.id === typeId);
   const typeName = (x: LeaveType) => (locale === 'km-KH' ? x.nameKm : x.nameEn || x.nameKm);
@@ -143,7 +163,9 @@ export function RequestForm({ kind, record, focus, nightShifts = false, onDone }
   const typeOk = kind !== 'leave' || (!!typeId && (!needsFile || files.length > 0));
   const otMinutes = overtimeMinutes(otFrom, otTo);
   const otOk = kind !== 'overtime' || (otFrom !== otTo && otMinutes <= 12 * 60 && (nightShifts || otTo > otFrom));
-  const valid = reason.trim().length >= 3 && timesOk && leaveOk && typeOk && otOk;
+  const awayOk = kind === 'out_of_office' ? toTime > fromTime : kind === 'business_trip' ? endDate >= startDate : true;
+  const swapOk = kind !== 'shift_swap' || (!!mineId && !!theirsId);
+  const valid = reason.trim().length >= 3 && timesOk && leaveOk && typeOk && otOk && awayOk && swapOk;
 
   const submit = async () => {
     setBusy(true);
@@ -158,6 +180,9 @@ export function RequestForm({ kind, record, focus, nightShifts = false, onDone }
       }
       if (kind === 'absence') Object.assign(body, { startDate });
       if (kind === 'overtime') Object.assign(body, { startDate, startTime: otFrom, endTime: otTo });
+      if (kind === 'out_of_office') Object.assign(body, { startDate, startTime: fromTime, endTime: toTime });
+      if (kind === 'business_trip') Object.assign(body, { startDate, endDate });
+      if (kind === 'shift_swap') Object.assign(body, { swapShiftId: mineId, swapWithShiftId: theirsId });
       if (missedIn) {
         Object.assign(body, { startDate, proposedClockIn: { date: startDate, time: clockIn } });
         if (clockOut) body.proposedClockOut = { date: outNextDay ? nextDay(startDate) : startDate, time: clockOut };
@@ -295,6 +320,60 @@ export function RequestForm({ kind, record, focus, nightShifts = false, onDone }
           </p>
           <p className="text-sm text-muted">{t('requests.otNote')}</p>
         </>
+      ) : null}
+
+      {kind === 'out_of_office' ? (
+        <>
+          <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('portal.date')}</span>
+            <input type="date" required className={INPUT} value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('requests.fromTime')}</span>
+              <input type="time" required className={INPUT} value={fromTime} onChange={(e) => setFromTime(e.target.value)} />
+            </label>
+            <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('requests.toTime')}</span>
+              <input type="time" required className={INPUT} value={toTime} onChange={(e) => setToTime(e.target.value)} />
+            </label>
+          </div>
+          {toTime <= fromTime ? <p className="rounded-xl bg-danger-pale px-3 py-2 text-sm text-danger">{t('errors.INVALID_TIME_RANGE')}</p> : null}
+          <p className="text-sm text-muted">{t('requests.remoteNote')}</p>
+        </>
+      ) : null}
+      {kind === 'business_trip' ? (
+        <>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('portal.from')}</span>
+              <input type="date" required className={INPUT} value={startDate} onChange={(e) => { setStartDate(e.target.value); if (e.target.value > endDate) setEndDate(e.target.value); }} />
+            </label>
+            <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('portal.to')}</span>
+              <input type="date" required min={startDate} className={INPUT} value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+            </label>
+          </div>
+          <p className="text-sm text-muted">{t('requests.remoteNote')}</p>
+        </>
+      ) : null}
+      {kind === 'shift_swap' ? (
+        swap && !swap.mine.length ? <Notice tone="info">{t('requests.swap.noShifts')}</Notice> : (
+          <>
+            <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('requests.swap.mine')}</span>
+              <select required className={INPUT} value={mineId} disabled={!swap} onChange={(e) => { setMineId(e.target.value); setTheirsId(''); }}>
+                {!swap ? <option value="">{t('common.loading')}</option> : null}
+                {(swap?.mine ?? []).map((x) => <option key={x.id} value={x.id}>{day(x.workDate)} · {time(x.startAt)}–{time(x.endAt)}</option>)}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm"><span className="text-muted">{t('requests.swap.theirs')}</span>
+              <select required className={INPUT} value={theirsId} disabled={!swap?.theirs.length} onChange={(e) => setTheirsId(e.target.value)}>
+                <option value="">{swap && !swap.theirs.length ? t('requests.swap.noColleagues') : t('requests.swap.pick')}</option>
+                {(swap?.theirs ?? []).filter((x) => x.id !== mineId).map((x) => (
+                  <option key={x.id} value={x.id}>
+                    {(locale === 'km-KH' ? x.nameKm : x.nameEn || x.nameKm)} · {day(x.workDate)} · {time(x.startAt)}–{time(x.endAt)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="text-sm text-muted">{t('requests.swap.note')}</p>
+          </>
+        )
       ) : null}
 
       {kind === 'correction' && !onlyOut ? (

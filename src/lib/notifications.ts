@@ -10,6 +10,10 @@ export type NotificationKind =
   | 'missed_clock_out'
   | 'absent_recorded'
   | 'pin_reset'
+  | 'shift_swap_asked'
+  | 'shift_swapped'
+  | 'reminder_clock_in'
+  | 'reminder_clock_out'
   | 'event';
 
 export type Notice = {

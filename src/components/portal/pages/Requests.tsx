@@ -6,11 +6,13 @@ import { useI18n } from '@/components/mini-app/i18n-context';
 import { AttachmentList, type AttachmentRef } from '@/components/AttachmentList';
 import { overtimeMinutes } from '@/components/mini-app/RequestForm';
 import { usePortal } from '../PortalShell';
+import { EmployeePicker } from '../EmployeePicker';
 import {
-  Badge, Card, DataTable, Dialog, Field, LoadState, Notice, PageHeader, Pager, Select, SmallButton, useLoad, type Column,
+  Badge, Card, DataTable, Dialog, Field, LoadState, Notice, PageHeader, Pager, Select, SmallButton, TextInput, useLoad, type Column,
 } from '../ui';
 
-type Kind = 'leave' | 'absence' | 'late' | 'missed_clock_in' | 'missed_clock_out' | 'correction' | 'overtime';
+type Kind = 'leave' | 'absence' | 'late' | 'missed_clock_in' | 'missed_clock_out' | 'correction' | 'overtime' | 'out_of_office' | 'business_trip' | 'shift_swap';
+type SwapShift = { workDate: string; startAt: string; endAt: string };
 type Item = {
   id: string; type: Kind; status: 'pending' | 'approved' | 'rejected' | 'cancelled'; reason: string;
   startDate: string | null; endDate: string | null; workDate: string | null;
@@ -21,9 +23,10 @@ type Item = {
   branchId: string | null; branchKm: string | null; branchEn: string | null;
   leaveTypeKm: string | null; leaveTypeEn: string | null; attachments: AttachmentRef[];
   otShift: { startAt: string; endAt: string } | null; otRecord: { clockInAt: string | null; clockOutAt: string | null } | null;
+  swap: { mine: SwapShift; theirs: SwapShift; with: { employeeCode: string; nameKm: string; nameEn: string | null } } | null;
 };
 
-const KINDS: Kind[] = ['leave', 'absence', 'late', 'missed_clock_in', 'missed_clock_out', 'correction', 'overtime'];
+const KINDS: Kind[] = ['leave', 'absence', 'late', 'missed_clock_in', 'missed_clock_out', 'correction', 'overtime', 'out_of_office', 'business_trip', 'shift_swap'];
 const TONE = { pending: 'warn', approved: 'ok', rejected: 'bad', cancelled: 'muted' } as const;
 const LIMIT = 50;
 
@@ -42,6 +45,7 @@ export function Requests() {
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [entering, setEntering] = useState(false);
 
   const state = useLoad(
     () => api<{ items: Item[]; total: number }>(
@@ -106,7 +110,12 @@ export function Requests() {
 
   return (
     <>
-      <PageHeader title={t('nav.requests')} />
+      <PageHeader
+        title={t('nav.requests')}
+        actions={me.branches.some((b) => can('request.review', b.id)) || can('request.review')
+          ? <SmallButton tone="primary" onClick={() => setEntering(true)}>{t('requests.enter.button')}</SmallButton> : null}
+      />
+      {entering ? <EnterAway onClose={(saved) => { setEntering(false); if (saved) state.reload(); }} /> : null}
       <div className="grid gap-3 sm:grid-cols-3 lg:max-w-3xl">
         <Field label={t('portal.status')}>
           <Select value={status} onChange={(e) => { setOffset(0); setStatus(e.target.value); }}>
@@ -183,6 +192,13 @@ export function Requests() {
                 {t('reports.col.shift')}: {open.otShift ? `${time(open.otShift.startAt)}–${time(open.otShift.endAt)}` : t('reports.noShift')} · {t('requests.noScan')}
               </p>
             ) : null}
+            {open.swap ? (
+              <dl className="grid grid-cols-2 gap-2 rounded-lg border border-line p-3 text-sm">
+                <Row label={t('requests.swap.gives', { name: name(open) })} value={`${day(open.swap.mine.workDate)} · ${time(open.swap.mine.startAt)}–${time(open.swap.mine.endAt)}`} />
+                <Row label={t('requests.swap.gives', { name: name(open.swap.with) })} value={`${day(open.swap.theirs.workDate)} · ${time(open.swap.theirs.startAt)}–${time(open.swap.theirs.endAt)}`} />
+              </dl>
+            ) : null}
+            {open.type === 'out_of_office' || open.type === 'business_trip' ? <p className="text-sm text-muted">{t('requests.remoteNote')}</p> : null}
             {open.type === 'late' && open.clockInAt ? <p className="text-sm text-muted">{t('home.clockInTime')}: {time(open.clockInAt)}</p> : null}
             <div className="rounded-lg bg-pale p-3 text-sm">
               <p className="mb-1 text-muted">{t('portal.reason')}</p>
@@ -234,5 +250,71 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
       <dt className="text-muted">{label}</dt>
       <dd className="font-semibold">{value}</dd>
     </div>
+  );
+}
+
+/** HR enters an out-of-office or business trip for someone; it is approved straight away. */
+function EnterAway({ onClose }: { onClose(saved: boolean): void }) {
+  const { t, locale, timeZone, errorText } = useI18n();
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone }).format(new Date());
+  const [form, setForm] = useState({
+    employeeId: '', type: 'out_of_office' as 'out_of_office' | 'business_trip',
+    startDate: today, endDate: today, startTime: '09:00', endTime: '12:00', reason: '',
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const set = (patch: Partial<typeof form>) => setForm({ ...form, ...patch });
+  const ooo = form.type === 'out_of_office';
+  const ok = form.employeeId && form.reason.trim().length >= 3 && (ooo ? form.endTime > form.startTime : form.endDate >= form.startDate);
+
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const { endDate, startTime, endTime, ...rest } = form;
+      await api('/api/portal/requests', {
+        method: 'PUT', locale,
+        body: { ...rest, reason: form.reason.trim(), ...(ooo ? { startTime, endTime } : { endDate }) },
+      });
+      onClose(true);
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open title={t('requests.enter.title')} onClose={() => onClose(false)}>
+      <p className="text-sm text-muted">{t('requests.enter.body')}</p>
+      <EmployeePicker label={t('portal.emp.name')} value={form.employeeId ? [form.employeeId] : []} initial={[]} onChange={(ids) => set({ employeeId: ids.at(-1) ?? '' })} />
+      <Field label={t('requests.kind')}>
+        <Select value={form.type} onChange={(e) => set({ type: e.target.value as typeof form.type })}>
+          <option value="out_of_office">{t('requests.type.out_of_office')}</option>
+          <option value="business_trip">{t('requests.type.business_trip')}</option>
+        </Select>
+      </Field>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Field label={ooo ? t('portal.date') : t('portal.from')}>
+          <TextInput type="date" value={form.startDate} onChange={(e) => set({ startDate: e.target.value })} />
+        </Field>
+        {ooo ? (
+          <>
+            <Field label={t('requests.fromTime')}><TextInput type="time" value={form.startTime} onChange={(e) => set({ startTime: e.target.value })} /></Field>
+            <Field label={t('requests.toTime')}><TextInput type="time" value={form.endTime} onChange={(e) => set({ endTime: e.target.value })} /></Field>
+          </>
+        ) : (
+          <Field label={t('portal.to')}><TextInput type="date" value={form.endDate} min={form.startDate} onChange={(e) => set({ endDate: e.target.value })} /></Field>
+        )}
+      </div>
+      <Field label={t('portal.reason')}>
+        <textarea rows={2} maxLength={1000} value={form.reason} onChange={(e) => set({ reason: e.target.value })} className="w-full rounded-lg border border-line bg-surface px-3 py-2" />
+      </Field>
+      {error ? <Notice tone="danger">{error}</Notice> : null}
+      <div className="flex flex-wrap justify-end gap-2">
+        <SmallButton onClick={() => onClose(false)}>{t('common.cancel')}</SmallButton>
+        <SmallButton tone="primary" disabled={busy || !ok} onClick={() => void save()}>{t('requests.enter.save')}</SmallButton>
+      </div>
+    </Dialog>
   );
 }

@@ -5,7 +5,9 @@ import { api } from '@/lib/client/api';
 import { AttachmentList, type AttachmentRef } from '@/components/AttachmentList';
 import { useI18n } from './i18n-context';
 import { Button, Header, Notice, Spinner } from './ui';
-import { overtimeMinutes, type RequestKind } from './RequestForm';
+import { localDate } from '@/lib/i18n';
+import { overtimeMinutes, type ClockFocus, type RecordRef, type RequestKind } from './RequestForm';
+import type { Me } from './Home';
 
 type Item = {
   id: string; type: RequestKind; status: 'pending' | 'approved' | 'rejected' | 'cancelled'; reason: string;
@@ -14,6 +16,20 @@ type Item = {
   proposedClockOutAt: string | null; createdAt: string; decidedAt: string | null; decisionNote: string | null;
   reviewerKm: string | null; reviewerEn: string | null;
   leaveTypeKm: string | null; leaveTypeEn: string | null; attachments: AttachmentRef[];
+  swap: { mine: SwapShift; theirs: SwapShift; with: { employeeCode: string; nameKm: string; nameEn: string | null } } | null;
+};
+type SwapShift = { workDate: string; startAt: string; endAt: string };
+
+/** The menu, in the order staff reach for them; corrections are always there. */
+const MENU: ('correction' | Me['profile']['requestTypes'][number])[] = ['correction', 'leave', 'overtime', 'out_of_office', 'business_trip', 'shift_swap', 'absence'];
+const ICON: Record<(typeof MENU)[number], string> = {
+  correction: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM12 7v5l3 2',
+  leave: 'M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z',
+  overtime: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM12 7v5M12 12h4',
+  out_of_office: 'M12 21s-7-6.2-7-12a7 7 0 0 1 14 0c0 5.8-7 12-7 12ZM12 11.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z',
+  business_trip: 'M4 8h16v12H4zM9 8V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3M4 13h16',
+  shift_swap: 'M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7',
+  absence: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM9 9l6 6M15 9l-6 6',
 };
 
 const TONE = {
@@ -21,8 +37,13 @@ const TONE = {
   rejected: 'bg-danger-pale text-danger', cancelled: 'bg-pale text-muted',
 } as const;
 
-export function Requests({ onNew }: { onNew(kind: RequestKind): void }) {
-  const { t, locale, day, time, dateTime, num, errorText } = useI18n();
+export function Requests({ types, onNew }: {
+  types: Me['profile']['requestTypes'];
+  onNew(kind: RequestKind, record?: RecordRef, focus?: ClockFocus): void;
+}) {
+  const { t, locale, timeZone, day, time, dateTime, num, errorText } = useI18n();
+  const [fixing, setFixing] = useState(false);
+  const [fixDate, setFixDate] = useState(() => localDate(new Date(), timeZone));
   const [tick, setTick] = useState(0);
   const [state, setState] = useState<{ tick: number; items: Item[] | null; error: string | null }>({ tick: -1, items: null, error: null });
   const [error, setError] = useState<string | null>(null);
@@ -66,12 +87,28 @@ export function Requests({ onNew }: { onNew(kind: RequestKind): void }) {
   return (
     <>
       <Header title={t('requests.title')} />
-      <div className="grid grid-cols-2 gap-3">
-        <Button onClick={() => onNew('leave')}>{t('requests.type.leave')}</Button>
-        <Button variant="secondary" onClick={() => onNew('absence')}>{t('requests.type.absence')}</Button>
-        <Button variant="secondary" className="col-span-2" onClick={() => onNew('overtime')}>{t('requests.type.overtime')}</Button>
-      </div>
-      <p className="text-sm text-muted">{t('requests.correctionHint')}</p>
+      <ul className="grid grid-cols-3 gap-2">
+        {MENU.filter((k) => k === 'correction' || types.includes(k)).map((k) => (
+          <li key={k}>
+            <button
+              type="button"
+              aria-expanded={k === 'correction' ? fixing : undefined}
+              onClick={() => (k === 'correction' ? setFixing(!fixing) : onNew(k))}
+              className={`pressable flex min-h-20 w-full flex-col items-center justify-center gap-1 rounded-xl border px-1 py-2 text-center text-xs leading-tight font-semibold ${
+                k === 'correction' && fixing ? 'border-primary-strong bg-pale' : 'border-line'
+              }`}
+            >
+              <svg viewBox="0 0 24 24" className="size-6 text-primary-strong" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d={ICON[k]} />
+              </svg>
+              {t(`requests.menu.${k}`)}
+            </button>
+          </li>
+        ))}
+      </ul>
+      {fixing ? <CorrectionPicker date={fixDate} onDate={setFixDate} onPick={(kind, record, focus) => { setFixing(false); onNew(kind, record, focus); }} /> : null}
+
+      <h2 className="mt-2 font-semibold">{t('requests.records')}</h2>
 
       {error ? <Notice tone="danger">{error}</Notice> : null}
       {state.error ? <Notice tone="danger">{state.error}</Notice> : null}
@@ -88,6 +125,15 @@ export function Requests({ onNew }: { onNew(kind: RequestKind): void }) {
               <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${TONE[r.status]}`}>{t(`requests.status.${r.status}`)}</span>
             </div>
             <p className="text-muted">{period(r)}</p>
+            {r.swap ? (
+              <p>
+                {t('requests.swap.summary', {
+                  mine: `${day(r.swap.mine.workDate)} ${time(r.swap.mine.startAt)}–${time(r.swap.mine.endAt)}`,
+                  theirs: `${day(r.swap.theirs.workDate)} ${time(r.swap.theirs.startAt)}–${time(r.swap.theirs.endAt)}`,
+                  name: km ? r.swap.with.nameKm : r.swap.with.nameEn || r.swap.with.nameKm,
+                })}
+              </p>
+            ) : null}
             {r.proposedClockInAt ? <p>{t('requests.correctIn')}: <span className="font-semibold tabular-nums">{time(r.proposedClockInAt)}</span></p> : null}
             {r.proposedClockOutAt ? <p>{t('requests.correctOut')}: <span className="font-semibold tabular-nums">{time(r.proposedClockOutAt)}</span></p> : null}
             <p className="mt-1">{r.reason}</p>
@@ -113,5 +159,45 @@ export function Requests({ onNew }: { onNew(kind: RequestKind): void }) {
         ))}
       </ul>
     </>
+  );
+}
+
+/**
+ * Correction from the menu: pick the day, then the form for that day's record, or for a
+ * forgotten clock-in when the day has none.
+ */
+function CorrectionPicker({ date, onDate, onPick }: {
+  date: string; onDate(date: string): void; onPick(kind: RequestKind, record?: RecordRef, focus?: ClockFocus): void;
+}) {
+  const { t, locale, timeZone, errorText } = useI18n();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const today = localDate(new Date(), timeZone);
+
+  const go = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const { items } = await api<{ items: (RecordRef & { status: string })[] }>(`/api/attendance/history?from=${date}&to=${date}`, { locale });
+      const rec = items[0];
+      if (!rec || rec.status === 'absent') return onPick('missed_clock_in', undefined, { only: 'in', date });
+      if (rec.status === 'pending_correction') return setError(t('home.correctionPending'));
+      onPick(rec.status === 'missed_clock_out' ? 'missed_clock_out' : 'correction', rec);
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="flex flex-col gap-3 rounded-2xl border border-line p-3">
+      <label className="flex flex-col gap-1 text-sm">
+        <span className="text-muted">{t('requests.menu.whichDay')}</span>
+        <input type="date" max={today} value={date} onChange={(e) => onDate(e.target.value)} className="min-h-12 w-full rounded-xl border border-line bg-surface px-3" />
+      </label>
+      {error ? <Notice tone="warning">{error}</Notice> : null}
+      <Button disabled={!date || busy} onClick={() => void go()}>{busy ? t('common.loading') : t('requests.menu.continue')}</Button>
+    </section>
   );
 }
