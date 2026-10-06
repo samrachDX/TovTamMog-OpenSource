@@ -124,9 +124,10 @@ append-only (trigger-enforced).
   absences and missed clock-outs appear sooner. The dashboard already counts absences
   live, and an overdue open shift is also flagged the next time that person scans.
 - **Clock reminders** need `/api/internal/reminders` called every 5 minutes with
-  `Authorization: Bearer $CRON_SECRET`. Vercel Hobby cannot do that, so
-  `.github/workflows/reminders.yml` calls it from GitHub Actions once the repository
-  secrets `APP_URL` and `CRON_SECRET` are set. Any other scheduler works too.
+  `Authorization: Bearer $CRON_SECRET`. Vercel Hobby cannot do that. A free external
+  scheduler such as cron-job.org works: a job every 5 minutes, GET
+  `https://<app>/api/internal/reminders`, with that header. (GitHub Actions on a private
+  repository would use about 8,600 of its 2,000 free minutes a month at this rate.)
 - **Telegram delivery.** The bot can only message people who have opened it at least once.
   Messages are sent right after the action that caused them and retried by the scheduled
   job; with the job running once a day, a message that failed the first time can be late.
