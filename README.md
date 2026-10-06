@@ -113,8 +113,9 @@ append-only (trigger-enforced).
   IP from the ISP avoids this. Staff on mobile data will always be refused when the IP
   check is on.
 - **Client IP source.** `TRUSTED_PROXY=vercel` reads `x-real-ip`, which Vercel sets
-  itself. With Cloudflare in front, use `cloudflare` and make sure the origin accepts
-  traffic only from Cloudflare, otherwise `cf-connecting-ip` could be forged.
+  itself. With Cloudflare in front, use `cloudflare` and set `CLOUDFLARE_ORIGIN_SECRET`,
+  added by a Cloudflare Transform Rule as the `x-origin-secret` request header; without
+  it `cf-connecting-ip` is ignored, because it could be forged by calling the origin directly.
 - **Database access.** The app connects with a privileged connection from server code
   only and does its own authorization. Row level security is enabled on every table with
   no policies, so the Supabase anon and authenticated API roles can read nothing.
@@ -122,6 +123,10 @@ append-only (trigger-enforced).
   what Vercel's Hobby plan allows. On Pro, change the schedule to every 15 minutes so
   absences and missed clock-outs appear sooner. The dashboard already counts absences
   live, and an overdue open shift is also flagged the next time that person scans.
+- **Clock reminders** need `/api/internal/reminders` called every 5 minutes with
+  `Authorization: Bearer $CRON_SECRET`. Vercel Hobby cannot do that, so
+  `.github/workflows/reminders.yml` calls it from GitHub Actions once the repository
+  secrets `APP_URL` and `CRON_SECRET` are set. Any other scheduler works too.
 - **Telegram delivery.** The bot can only message people who have opened it at least once.
   Messages are sent right after the action that caused them and retried by the scheduled
   job; with the job running once a day, a message that failed the first time can be late.

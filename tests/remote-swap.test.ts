@@ -76,7 +76,8 @@ describe('out of office and business trips', () => {
     const [ev] = await db.query<{ remote_request_id: string; latitude: number | null }>(`select remote_request_id, latitude from attendance_events`);
     expect(ev).toEqual({ remote_request_id: id, latitude: null });
 
-    // The window ends an hour after the out-of-office: clocking out remotely at 16:00 is refused, at the branch it works.
+    // The window ends 15 minutes after the out-of-office: clocking out remotely at 12:20 is refused, at the branch it works.
+    expect(failures(await away(day(6, 5, 20), 'clock_out'))).toEqual(['REMOTE_NOT_APPROVED']);
     expect(failures(await away(day(6, 9), 'clock_out'))).toEqual(['REMOTE_NOT_APPROVED']);
     const out = await tap(day(6, 9), { action: 'clock_out' });
     expect(out.ok).toBe(true);
@@ -139,6 +140,17 @@ describe('shift swap', () => {
     await db.query(`update shift_assignments set status = 'cancelled' where id = $1`, [b]);
     await expect(decideRequest(db, manager, id, { decision: 'approved' })).rejects.toThrow('SWAP_NOT_ALLOWED');
     await cancelMyRequest(db, me(day(11, ++hr)), id);
+  });
+
+  it('refuses when the colleague shift went to someone else meanwhile', async () => {
+    const a = await addShift(db, f, day(27), day(27, 9));
+    const b = await addShift(db, { employeeId: colleague, branchId: f.branchId }, day(26, 10), day(26, 18));
+    const { id } = await createRequest(db, me(day(11, ++hr)), { type: 'shift_swap', swapShiftId: a, swapWithShiftId: b, reason: 'ប្ដូរវេន' });
+    const third = await addEmployee(db, f.orgId, 'TRD', [f.branchId]);
+    await db.query(`update shift_assignments set employee_id = $2 where id = $1`, [b, third]);
+    await expect(decideRequest(db, manager, id, { decision: 'approved' })).rejects.toThrow('SWAP_NOT_ALLOWED');
+    const [owner] = await db.query<{ employee_id: string }>(`select employee_id from shift_assignments where id = $1`, [b]);
+    expect(owner.employee_id).toBe(third);
   });
 });
 

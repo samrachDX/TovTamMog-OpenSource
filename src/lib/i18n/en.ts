@@ -1045,7 +1045,7 @@ export const en: Record<MessageKey, string> = {
   'requests.help.out_of_office': 'For a few hours away from the branch for work, such as meeting a client. Once approved you can clock in and out from where you are.',
   'requests.help.business_trip': 'For whole days working away from the branch. Once approved you can clock in and out from where you are on those days.',
   'requests.help.shift_swap': 'Trade one of your upcoming shifts with a colleague at the same branch. Your manager approves it, then the schedule changes for both of you.',
-  'requests.remoteNote': 'While it is approved, clocking skips the branch location, network and QR checks for this time, plus an hour either side.',
+  'requests.remoteNote': 'While it is approved, clocking skips the branch location, network and QR checks for this time, plus 15 minutes either side.',
   'requests.swap.mine': 'Your shift',
   'requests.swap.theirs': 'Colleague\'s shift',
   'requests.swap.pick': 'Choose a shift',

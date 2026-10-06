@@ -20,6 +20,11 @@ async function main() {
       `create table if not exists app_migrations (name text primary key, applied_at timestamptz not null default now())`,
     );
     await client.query(`alter table app_migrations enable row level security`);
+    // Same as every other table: the Supabase API roles get nothing.
+    await client.query(`do $$ begin
+      if exists (select 1 from pg_roles where rolname = 'anon') then revoke all on app_migrations from anon; end if;
+      if exists (select 1 from pg_roles where rolname = 'authenticated') then revoke all on app_migrations from authenticated; end if;
+    end $$`);
     const done = new Set((await client.query(`select name from app_migrations`)).rows.map((r) => r.name as string));
     for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()) {
       if (done.has(file)) continue;

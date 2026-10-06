@@ -19,6 +19,12 @@ const schema = z.object({
    * origin accepts traffic from Cloudflare alone). none: no trusted header (local dev).
    */
   TRUSTED_PROXY: z.enum(['vercel', 'cloudflare', 'none']).default('none'),
+  /**
+   * With TRUSTED_PROXY=cloudflare: a secret a Cloudflare Transform Rule adds as the
+   * `x-origin-secret` request header. Without it, cf-connecting-ip is not trusted, since
+   * anyone reaching the origin directly could set that header.
+   */
+  CLOUDFLARE_ORIGIN_SECRET: z.preprocess(blankAsUnset, z.string().min(16).optional()),
   TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: z.coerce.number().int().positive().default(3600),
   SESSION_TTL_HOURS: z.coerce.number().int().positive().default(24),
   PIN_SESSION_TTL_MINUTES: z.coerce.number().int().positive().default(720),

@@ -1,4 +1,5 @@
 import 'server-only';
+import { timingSafeEqual } from 'node:crypto';
 import { after } from 'next/server';
 import { db } from '@/lib/db';
 import { env } from '@/lib/env';
@@ -24,8 +25,8 @@ export function authConfig(): AuthConfig {
 /**
  * The client's public IP, taken only from the header the configured edge sets itself.
  * - vercel: `x-real-ip`. Vercel overwrites it on every request, so a client cannot forge it.
- * - cloudflare: `cf-connecting-ip`. Trustworthy only if the origin refuses traffic that
- *   did not come through Cloudflare; otherwise anyone reaching Vercel directly could set it.
+ * - cloudflare: `cf-connecting-ip`, only when the request carries the CLOUDFLARE_ORIGIN_SECRET
+ *   that a Cloudflare Transform Rule adds; anyone reaching the origin directly could set it.
  * - none: no header is trusted. In development DEV_CLIENT_IP may stand in.
  * Client-supplied forwarding headers such as x-forwarded-for are never read.
  */
@@ -33,7 +34,7 @@ export function clientIp(req: Request): string | null {
   const e = env();
   let raw: string | null = null;
   if (e.TRUSTED_PROXY === 'vercel') raw = req.headers.get('x-real-ip');
-  else if (e.TRUSTED_PROXY === 'cloudflare') raw = req.headers.get('cf-connecting-ip');
+  else if (e.TRUSTED_PROXY === 'cloudflare') raw = fromCloudflare(req, e.CLOUDFLARE_ORIGIN_SECRET) ? req.headers.get('cf-connecting-ip') : null;
   else if (process.env.NODE_ENV !== 'production') raw = e.DEV_CLIENT_IP ?? null;
   if (!raw) return null;
   const value = raw.trim();
@@ -150,6 +151,21 @@ export function flushOutbox(): void {
   });
 }
 
+/** The request passed through Cloudflare: it carries the secret our Transform Rule adds. */
+function fromCloudflare(req: Request, secret: string | undefined): boolean {
+  if (!secret) return false;
+  const given = Buffer.from(req.headers.get('x-origin-secret') ?? '');
+  const expected = Buffer.from(secret);
+  return given.length === expected.length && timingSafeEqual(given, expected);
+}
+
+/** What is safe to log about an error: no Postgres `detail`, which can hold personal data. */
+export function errorSummary(err: unknown) {
+  if (!(err instanceof Error)) return { error: String(err).slice(0, 200) };
+  const e = err as Error & { code?: string; constraint?: string; table?: string };
+  return { name: e.name, message: e.message, code: e.code, constraint: e.constraint, table: e.table, stack: e.stack };
+}
+
 /** Wraps a route handler: translated errors for the user, details only in server logs. */
 export async function handle(req: Request, fn: () => Promise<Response>): Promise<Response> {
   const locale = requestLocale(req);
@@ -157,7 +173,7 @@ export async function handle(req: Request, fn: () => Promise<Response>): Promise
     return await fn();
   } catch (err) {
     if (err instanceof AppError) return json(errorBody(locale, err.code, err.params), err.status);
-    console.error('[api] unhandled error', { path: new URL(req.url).pathname, err });
+    console.error('[api] unhandled error', { path: new URL(req.url).pathname, ...errorSummary(err) });
     return json(errorBody(locale, 'INTERNAL'), 500);
   }
 }

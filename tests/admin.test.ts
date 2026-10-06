@@ -47,6 +47,23 @@ beforeAll(async () => {
 });
 afterAll(() => close());
 
+describe('account takeover guard', () => {
+  it('a branch-level HR manager cannot touch someone with an organization-wide role', async () => {
+    const branchHr = await actorWith('BHR', 'hr_manager', f.branchId);
+    const auditor = await actorWith('AUD', 'auditor');
+    const plain = await actorWith('PLN', null);
+    for (const act of [
+      () => resetEmployeePin(db, branchHr, auditor.employeeId, { reason: 'takeover' }),
+      () => issueEnrollmentCode(db, branchHr, cfg.appSecret, auditor.employeeId),
+      () => setEmployeeStatus(db, branchHr, auditor.employeeId, { status: 'suspended', reason: 'takeover' }),
+      () => updateEmployee(db, branchHr, auditor.employeeId, { nameEn: 'Renamed' }),
+    ]) await expect(act()).rejects.toThrow('FORBIDDEN');
+    // Staff of their branch are still theirs to manage, and the org-wide HR manager can act on the auditor.
+    await resetEmployeePin(db, branchHr, plain.employeeId, { reason: 'forgot PIN' });
+    await resetEmployeePin(db, hr, auditor.employeeId, { reason: 'forgot PIN' });
+  });
+});
+
 describe('portal access', () => {
   it('is for people with management permissions only', () => {
     expect(hasPortalAccess(admin.grants)).toBe(true);
@@ -132,14 +149,24 @@ describe('employees', () => {
 
     await expect(setEmployeeStatus(db, hr, newId, { status: 'suspended' })).rejects.toThrow('REASON_REQUIRED');
     await expect(setEmployeeStatus(db, hr, hr.employeeId, { status: 'inactive', reason: 'testing' })).rejects.toThrow('CANNOT_MODIFY_SELF');
+    // A remembered phone stops skipping the PIN when the account is suspended or unlinked.
+    const remember = (hash: string) => db.query(
+      `insert into trusted_devices (employee_id, telegram_user_id, token_hash, expires_at) values ($1, 880001, $2, $3)`,
+      [newId, hash, new Date(now.getTime() + 86_400_000)],
+    );
+    const liveDevices = async () => (await db.query(`select 1 from trusted_devices where employee_id = $1 and revoked_at is null`, [newId])).length;
+    await remember('device-a');
     await setEmployeeStatus(db, hr, newId, { status: 'suspended', reason: 'ឈប់បណ្តោះអាសន្ន' });
+    expect(await liveDevices()).toBe(0);
     await expect(getSession(db, cfg, token, now)).rejects.toThrow('UNAUTHENTICATED');
     await expect(authenticateTelegram(db, cfg, initDataFor('880001', now), { now })).rejects.toThrow('ACCOUNT_DISABLED');
     await setEmployeeStatus(db, hr, newId, { status: 'active', reason: 'ត្រឡប់មកវិញ' });
     expect((await audits('employee.status')).map((a) => a.reason)).toEqual(['ឈប់បណ្តោះអាសន្ន', 'ត្រឡប់មកវិញ']);
 
     await resetEmployeePin(db, hr, newId, { reason: 'forgot PIN' });
+    await remember('device-b');
     await unlinkTelegram(db, hr, newId, { reason: 'new phone' });
+    expect(await liveDevices()).toBe(0);
     expect((await authenticateTelegram(db, cfg, initDataFor('880001', now), { now })).state).toBe('not_enrolled');
     await expect(unlinkTelegram(db, hr, newId, { reason: 'again' })).rejects.toThrow('TELEGRAM_NOT_LINKED');
   });

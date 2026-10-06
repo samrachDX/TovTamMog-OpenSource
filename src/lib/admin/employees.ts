@@ -208,6 +208,8 @@ export async function createEmployee(db: Db, actor: Actor, input: Input): Promis
 export async function updateEmployee(db: Db, actor: Actor, id: string, input: Input): Promise<void> {
   await db.tx(async (tx) => {
     const before = await loadScoped(tx, actor, id, 'employee.update', true);
+    // Editing yourself is fine; editing someone above you is not.
+    if (id !== actor.employeeId) await assertOutranks(tx, actor, id, 'employee.update');
     const next = {
       employee_code: input.employeeCode === undefined ? before.employee_code : text(input, 'employeeCode', { max: 30 }),
       name_km: input.nameKm === undefined ? before.name_km : text(input, 'nameKm', { max: 120 }),
@@ -254,19 +256,31 @@ export async function updateEmployee(db: Db, actor: Actor, id: string, input: In
 /**
  * Account-level actions (suspend, unlink, new enrollment code, PIN reset) hand over or
  * take away someone's sign-in. They are allowed only on people ranked below the actor,
- * so a manager cannot seize or lock out an administrator. Super admins are exempt.
+ * so a manager cannot seize or lock out an administrator. Someone holding an
+ * organization-wide role (beyond the basic employee role) can only be handled by a person
+ * who has `permission` organization-wide and outranks them there: a branch-level manager
+ * must not be able to take over an organization-wide account. Organization-wide super
+ * admins are exempt.
  */
-async function assertOutranks(db: Db, actor: Actor, targetId: string): Promise<void> {
-  const rows = await db.query<{ id: string; rank: number | null }>(
-    `select ra.employee_id as id, max(r.rank)::int as rank
+async function assertOutranks(db: Db, actor: Actor, targetId: string, permission: Permission): Promise<void> {
+  if (targetId === actor.employeeId) throw new AppError('FORBIDDEN');
+  const rows = await db.query<{ id: string; rank: number; org_wide: boolean; role_key: string }>(
+    `select ra.employee_id as id, r.rank, ra.branch_id is null as org_wide, ra.role_key
      from role_assignments ra join roles r on r.key = ra.role_key
-     where ra.employee_id = any($1::uuid[]) and ra.revoked_at is null group by ra.employee_id`,
+     where ra.employee_id = any($1::uuid[]) and ra.revoked_at is null`,
     [[actor.employeeId, targetId]],
   );
-  const rank = (id: string) => rows.find((r) => r.id === id)?.rank ?? 0;
-  const mine = rank(actor.employeeId);
-  if (mine >= 100) return;
-  if (targetId === actor.employeeId || rank(targetId) >= mine) throw new AppError('FORBIDDEN');
+  const max = (list: typeof rows) => Math.max(0, ...list.map((r) => r.rank));
+  const mine = rows.filter((r) => r.id === actor.employeeId);
+  const theirs = rows.filter((r) => r.id === targetId);
+  const myOrgRank = max(mine.filter((r) => r.org_wide));
+  if (myOrgRank >= 100) return;
+  const theirRank = max(theirs);
+  if (theirs.some((r) => r.org_wide && r.role_key !== 'employee')) {
+    if (!can(actor.grants, permission) || theirRank >= myOrgRank) throw new AppError('FORBIDDEN');
+    return;
+  }
+  if (theirRank >= max(mine)) throw new AppError('FORBIDDEN');
 }
 
 /** Activate, suspend or deactivate. Anything other than active ends the person's sessions. */
@@ -277,11 +291,13 @@ export async function setEmployeeStatus(db: Db, actor: Actor, id: string, input:
   const now = actor.now ?? new Date();
   await db.tx(async (tx) => {
     const before = await loadScoped(tx, actor, id, 'employee.update', true);
-    await assertOutranks(tx, actor, id);
+    await assertOutranks(tx, actor, id, 'employee.update');
     if (before.status === status) return;
     await tx.query(`update employees set status = $2, updated_at = $3 where id = $1`, [id, status, now]);
     if (status !== 'active') {
       await tx.query(`update sessions set revoked_at = $2 where employee_id = $1 and revoked_at is null`, [id, now]);
+      // Remembered phones would otherwise skip the PIN once the account is active again.
+      await tx.query(`update trusted_devices set revoked_at = $2 where employee_id = $1 and revoked_at is null`, [id, now]);
     }
     await recordAudit(tx, {
       orgId: actor.orgId, actorEmployeeId: actor.employeeId, action: 'employee.status', entityType: 'employee',
@@ -292,7 +308,7 @@ export async function setEmployeeStatus(db: Db, actor: Actor, id: string, input:
 
 export async function issueEnrollmentCode(db: Db, actor: Actor, appSecret: string, id: string) {
   await loadScoped(db, actor, id, 'employee.enroll');
-  await assertOutranks(db, actor, id);
+  await assertOutranks(db, actor, id, 'employee.enroll');
   return createEnrollmentCode(db, { appSecret }, {
     employeeId: id, actorEmployeeId: actor.employeeId, ttlHours: 24, ip: actor.ip, now: actor.now,
   });
@@ -305,7 +321,7 @@ export async function unlinkTelegram(db: Db, actor: Actor, id: string, input: In
   const now = actor.now ?? new Date();
   await db.tx(async (tx) => {
     const before = await loadScoped(tx, actor, id, 'employee.enroll', true);
-    await assertOutranks(tx, actor, id);
+    await assertOutranks(tx, actor, id, 'employee.enroll');
     if (!before.telegram_linked) throw new AppError('TELEGRAM_NOT_LINKED');
     await tx.query(
       `update employees set telegram_user_id = null, telegram_username = null, telegram_linked_at = null, updated_at = $2
@@ -313,6 +329,8 @@ export async function unlinkTelegram(db: Db, actor: Actor, id: string, input: In
       [id, now],
     );
     await tx.query(`update sessions set revoked_at = $2 where employee_id = $1 and revoked_at is null`, [id, now]);
+    // A lost phone is the usual reason to unlink: it must not keep skipping the PIN.
+    await tx.query(`update trusted_devices set revoked_at = $2 where employee_id = $1 and revoked_at is null`, [id, now]);
     await recordAudit(tx, {
       orgId: actor.orgId, actorEmployeeId: actor.employeeId, action: 'telegram.unlink', entityType: 'employee',
       entityId: id, reason: why, ip: actor.ip, at: now,
@@ -323,7 +341,7 @@ export async function unlinkTelegram(db: Db, actor: Actor, id: string, input: In
 export async function resetEmployeePin(db: Db, actor: Actor, id: string, input: Input): Promise<void> {
   const why = reason(input);
   await loadScoped(db, actor, id, 'employee.pin_reset');
-  await assertOutranks(db, actor, id);
+  await assertOutranks(db, actor, id, 'employee.pin_reset');
   await initiatePinReset(db, { employeeId: id, actorEmployeeId: actor.employeeId, reason: why, ip: actor.ip, now: actor.now });
 }
 

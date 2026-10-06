@@ -43,7 +43,8 @@ export async function listAudit(db: Db, actor: Actor, filter: Input) {
   // The audit trail spans the organization, so it needs the organization-wide permission.
   requireCan(actor, 'audit.view');
   const exporting = filter.export === '1' || filter.export === true;
-  if (exporting && !actor.grants.some((g) => g.permission === 'report.export')) throw new AppError('FORBIDDEN');
+  // An export of the organization-wide trail needs the organization-wide export permission.
+  if (exporting) requireCan(actor, 'report.export');
   const from = filter.from ? date(filter, 'from') : null;
   const to = filter.to ? date(filter, 'to') : null;
   if (from && to && (Date.parse(to) < Date.parse(from) || Date.parse(to) - Date.parse(from) > 366 * 86_400_000)) {

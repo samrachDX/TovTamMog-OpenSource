@@ -1,18 +1,18 @@
 -- Out-of-office and business trip requests (an approved one lets the person clock in and out
 -- remotely, away from the branch), shift swaps between colleagues, and clock reminders.
 
-alter table employee_requests drop constraint employee_requests_type_check;
+alter table employee_requests drop constraint if exists employee_requests_type_check;
 alter table employee_requests add constraint employee_requests_type_check
   check (type in ('leave', 'absence', 'late', 'missed_clock_out', 'correction', 'overtime', 'missed_clock_in',
                   'out_of_office', 'business_trip', 'shift_swap'));
 
-alter table employee_requests drop constraint employee_requests_check1;
+alter table employee_requests drop constraint if exists employee_requests_check1;
 alter table employee_requests add constraint employee_requests_check1
   check ((type in ('leave', 'absence', 'overtime', 'missed_clock_in', 'out_of_office', 'business_trip', 'shift_swap'))
          = (start_date is not null));
 
 -- Out of office is a window of hours on one day, like part-day leave.
-alter table employee_requests drop constraint employee_requests_leave_shape;
+alter table employee_requests drop constraint if exists employee_requests_leave_shape;
 alter table employee_requests add constraint employee_requests_leave_shape check (
   (type not in ('overtime', 'out_of_office') and leave_unit = 'day' and half_day_part is null and start_time is null and end_time is null)
   or (leave_unit = 'half_day' and type = 'leave' and half_day_part is not null and start_time is null and end_time is null

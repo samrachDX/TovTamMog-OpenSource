@@ -1,4 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
+import { errorSummary } from '@/lib/http';
 import { db } from '@/lib/db';
 import { env } from '@/lib/env';
 import { runAttendanceMaintenance } from '@/lib/attendance/maintenance';
@@ -22,7 +23,7 @@ export async function GET(req: Request) {
     const telegram = await deliverOutbox(db, telegramSender(env().TELEGRAM_BOT_TOKEN), { limit: 200, appUrl: env().APP_URL });
     return Response.json({ ok: true, ...maintenance, telegram }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err) {
-    console.error('[cron] attendance-check failed', err);
+    console.error('[cron] attendance-check failed', errorSummary(err));
     return Response.json({ ok: false }, { status: 500, headers: { 'Cache-Control': 'no-store' } });
   }
 }

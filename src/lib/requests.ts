@@ -217,7 +217,7 @@ export async function swapOptions(db: Db, employeeId: string, now: Date = new Da
 
 /**
  * The approved out-of-office or business trip that covers this moment, if any. An
- * out-of-office counts from an hour before its start to an hour after its end, so
+ * out-of-office counts from 15 minutes before its start to 15 minutes after its end, so
  * arriving or leaving a little early or late still works.
  */
 export async function remoteCover(db: Db, employeeId: string, now: Date, timeZone: string) {
@@ -228,8 +228,8 @@ export async function remoteCover(db: Db, employeeId: string, now: Date, timeZon
      where employee_id = $1 and status = 'approved' and type in ('out_of_office', 'business_trip')
        and (($2::timestamptz at time zone $3)::date between start_date and end_date)
        and (type = 'business_trip'
-         or $2::timestamptz between ((start_date + start_time) at time zone $3) - interval '1 hour'
-                                and ((start_date + end_time) at time zone $3) + interval '1 hour')
+         or $2::timestamptz between ((start_date + start_time) at time zone $3) - interval '15 minutes'
+                                and ((start_date + end_time) at time zone $3) + interval '15 minutes')
      order by type = 'out_of_office' desc, created_at desc limit 1`,
     [employeeId, now, timeZone],
   );
@@ -873,6 +873,8 @@ export async function decideRequest(db: Db, actor: Actor, id: string, input: Inp
       if (decision === 'approved') {
         // Checked again now: either shift may have changed while the request waited.
         const { mine, theirs } = await checkSwap(tx, req.employee_id, req.swap_shift_id!, req.swap_with_shift_id!, now, true);
+        // The colleague's shift may have changed hands since the request: never move it from someone who did not agree.
+        if (theirs.employee_id !== req.swap_with_employee_id) throw new AppError('SWAP_NOT_ALLOWED');
         await tx.query(`update shift_assignments set employee_id = $2, updated_at = $3 where id = $1`, [mine.id, theirs.employee_id, now]);
         await tx.query(`update shift_assignments set employee_id = $2, updated_at = $3 where id = $1`, [theirs.id, req.employee_id, now]);
         await recordAudit(tx, {
