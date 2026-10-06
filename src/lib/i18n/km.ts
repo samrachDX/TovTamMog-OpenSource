@@ -1284,6 +1284,20 @@ export const km = {
   'audit.k.peaks': 'ម៉ោងរវល់',
   'audit.k.blackouts': 'ថ្ងៃរវល់',
   'audit.k.warnings': 'ការព្រមាន',
+  'nav.daysOff': 'ថ្ងៃឈប់សម្រាក',
+  'dayoff.add': 'បន្ថែមថ្ងៃឈប់',
+  'dayoff.add.note': 'ជ្រើសបុគ្គលិក និងថ្ងៃឈប់។ ដើម្បីប្ដូរថ្ងៃឈប់ សូមបំពេញថ្ងៃដែលត្រូវធ្វើការជំនួសផងដែរ។ បុគ្គលិកនឹងទទួលដំណឹងភ្លាមៗ។',
+  'dayoff.add.person': 'បុគ្គលិក',
+  'dayoff.add.pick': 'ជ្រើសបុគ្គលិក',
+  'dayoff.month.more': '+{n} នាក់ទៀត',
+  'dayoff.month.asked': 'ស្នើ {n}',
+  'dayoff.month.work': 'ធ្វើការ',
+  'dayoff.month.addShort': 'ថ្ងៃឈប់',
+  'dayoff.month.legendOff': 'ឈ្មោះ៖ ថ្ងៃឈប់',
+  'dayoff.month.legendLeave': 'ឈ្មោះ៖ ច្បាប់',
+  'dayoff.page.note': 'ថ្ងៃនីមួយៗបង្ហាញអ្នកដែលឈប់។ ចុច + លើថ្ងៃណាមួយ ដើម្បីឲ្យបុគ្គលិកឈប់ថ្ងៃនោះ។',
+  'dayoff.page.waiting': 'សំណើថ្ងៃឈប់កំពុងរង់ចាំការសម្រេច៖ {n}។',
+  'dayoff.page.review': 'ពិនិត្យសំណើ',
 } as const;
 
 export type MessageKey = keyof typeof km;

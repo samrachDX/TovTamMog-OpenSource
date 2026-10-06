@@ -5,7 +5,8 @@ import { api } from '@/lib/client/api';
 import { useI18n } from '@/components/mini-app/i18n-context';
 import { usePortal } from './PortalShell';
 import { WEEKDAYS } from './WeeklySchedule';
-import { Badge, Card, Check, Dialog, Field, LoadState, Notice, Select, SmallButton, TextInput, useLoad } from './ui';
+import { Badge, Card, Check, Dialog, Field, LoadState, Notice, Select, SmallButton, TextInput, useLoad, type Loaded } from './ui';
+import type { EmployeeItem } from './pages/Employees';
 
 /*
  * Days off in the portal: the month calendar, the dialog that gives, takes back or moves a
@@ -61,9 +62,27 @@ function monthDays(month: string): string[] {
   const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
   return Array.from({ length: last }, (_, i) => `${month}-${String(i + 1).padStart(2, '0')}`);
 }
-function shiftMonth(month: string, by: number): string {
+export function shiftMonth(month: string, by: number): string {
   const [y, m] = month.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1 + by, 1)).toISOString().slice(0, 7);
+}
+/** The Monday-to-Sunday weeks a month's calendar shows. */
+export function monthRange(month: string): { from: string; to: string } {
+  const dates = monthDays(month);
+  return { from: mondayOf(dates[0]), to: addDays(mondayOf(dates.at(-1)!), 6) };
+}
+
+/** Every active employee of a branch, page by page, so branches above one page are not cut short. */
+export async function allBranchStaff(branchId: string, locale: Parameters<typeof api>[1]['locale']): Promise<{ items: EmployeeItem[] }> {
+  const items: EmployeeItem[] = [];
+  for (let offset = 0; offset < 5000; offset += 200) {
+    const page = await api<{ items: EmployeeItem[]; total: number }>(
+      `/api/portal/employees?branchId=${branchId}&status=active&limit=200&offset=${offset}`, { locale },
+    );
+    items.push(...page.items);
+    if (items.length >= page.total || !page.items.length) break;
+  }
+  return { items };
 }
 
 export function useBoard(branchId: string, from: string, to: string) {
@@ -134,8 +153,10 @@ export function CoverageBadge({ c }: { c: Coverage }) {
 
 // ---- change dialog ---------------------------------------------------------------------
 
+type PersonRef = { id: string; employeeCode: string; nameKm: string; nameEn: string | null };
+/** Who and which days to change. Without a person, the dialog asks for one from `people`. */
 export type ChangeTarget = {
-  branchId: string; person: { id: string; employeeCode: string; nameKm: string; nameEn: string | null };
+  branchId: string; person?: PersonRef; people?: PersonRef[];
   offDate?: string; workDate?: string; requestNote?: string;
 };
 
@@ -144,12 +165,14 @@ export type ChangeTarget = {
  * typed, so the manager sees the staffing warnings, or why it cannot be done, before saving.
  */
 export function DayOffDialog({ target, today, onClose, onDone }: { target: ChangeTarget | null; today: string; onClose(): void; onDone(message: string): void }) {
-  return target ? <ChangeForm key={`${target.person.id}${target.offDate}${target.workDate}`} target={target} today={today} onClose={onClose} onDone={onDone} /> : null;
+  return target ? <ChangeForm key={`${target.person?.id}${target.offDate}${target.workDate}`} target={target} today={today} onClose={onClose} onDone={onDone} /> : null;
 }
 
 function ChangeForm({ target, today, onClose, onDone }: { target: ChangeTarget; today: string; onClose(): void; onDone(message: string): void }) {
   const { t, locale, day, errorText } = useI18n();
   const { name } = usePortal();
+  const [personId, setPersonId] = useState(target.person?.id ?? '');
+  const who = target.person ?? target.people?.find((p) => p.id === personId);
   const [offDate, setOffDate] = useState(target.offDate ?? '');
   const [workDate, setWorkDate] = useState(target.workDate ?? '');
   const [templateId, setTemplateId] = useState('');
@@ -161,13 +184,13 @@ function ChangeForm({ target, today, onClose, onDone }: { target: ChangeTarget; 
     () => api<{ items: Template[] }>(`/api/portal/schedule/templates?branchId=${target.branchId}`, { locale }).then((d) => d.items.filter((x) => x.active)),
     [target.branchId],
   );
-  const body = { branchId: target.branchId, employeeId: target.person.id, offDate: offDate || undefined, workDate: workDate || undefined, templateId: templateId || undefined };
-  const ready = (!!offDate || !!workDate) && offDate !== workDate;
+  const body = { branchId: target.branchId, employeeId: personId, offDate: offDate || undefined, workDate: workDate || undefined, templateId: templateId || undefined };
+  const ready = !!personId && (!!offDate || !!workDate) && offDate !== workDate;
   const preview = useLoad(
     () => (ready
       ? api<{ warnings: Warning[]; problem: { code: string; message: string } | null }>('/api/portal/schedule/days-off', { body: { type: 'preview', ...body }, locale })
       : Promise.resolve({ warnings: [], problem: null })),
-    [offDate, workDate, templateId],
+    [personId, offDate, workDate, templateId],
   );
   const warnings = preview.data?.warnings ?? [];
   const problem = preview.data?.problem ?? null;
@@ -178,7 +201,7 @@ function ChangeForm({ target, today, onClose, onDone }: { target: ChangeTarget; 
     setError(null);
     try {
       await api('/api/portal/schedule/days-off', { body: { type: 'change', ...body, reason: reason.trim(), confirm: ack }, locale });
-      onDone(t('dayoff.change.done', { name: name(target.person) }));
+      onDone(t('dayoff.change.done', { name: who ? name(who) : '' }));
       onClose();
     } catch (err) {
       setError(errorText(err));
@@ -188,9 +211,17 @@ function ChangeForm({ target, today, onClose, onDone }: { target: ChangeTarget; 
   };
 
   return (
-    <Dialog open title={`${t('dayoff.change.title')} · ${name(target.person)}`} onClose={onClose}>
-      <p className="text-sm text-muted">{t('dayoff.change.note')}</p>
+    <Dialog open title={target.person ? `${t('dayoff.change.title')} · ${name(target.person)}` : t('dayoff.add')} onClose={onClose}>
+      <p className="text-sm text-muted">{t(target.person ? 'dayoff.change.note' : 'dayoff.add.note')}</p>
       {target.requestNote ? <Notice tone="info">{target.requestNote}</Notice> : null}
+      {!target.person ? (
+        <Field label={t('dayoff.add.person')}>
+          <Select value={personId} onChange={(e) => { setAck(false); setPersonId(e.target.value); }}>
+            <option value="">{t('dayoff.add.pick')}</option>
+            {(target.people ?? []).map((p) => <option key={p.id} value={p.id}>{name(p)} · {p.employeeCode}</option>)}
+          </Select>
+        </Field>
+      ) : null}
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label={t('dayoff.change.offDate')} hint={t('dayoff.change.offHint')}>
           <TextInput type="date" min={today} value={offDate} onChange={(e) => { setAck(false); setOffDate(e.target.value); }} />
@@ -233,36 +264,32 @@ function ChangeForm({ target, today, onClose, onDone }: { target: ChangeTarget; 
 // ---- month calendar -------------------------------------------------------------------
 
 /**
- * A month at a glance for one branch: each day shows how many people work against the
- * minimum, how many are off or on leave, open requests and busy dates. Choosing a person
- * shows their own month instead; choosing a day lists who works and who is off, with the
- * actions to change it.
+ * A month at a glance for one branch. Each day lists who is off or on leave and how many
+ * people work against the minimum, with a button to add a day off on that date. Choosing a
+ * person shows their own month instead; choosing a day lists who works and who is off, with
+ * the actions to change it.
  */
-export function MonthView({ branchId, canManage, today, onChanged }: { branchId: string; canManage: boolean; today: string; onChanged?(): void }) {
-  const { t, num } = useI18n();
+export function MonthView({ board, month, onMonth, today, canManage, onChange }: {
+  board: Loaded<Board>; month: string; onMonth(month: string): void; today: string; canManage: boolean; onChange(target: ChangeTarget): void;
+}) {
+  const { t, num, day } = useI18n();
   const { name } = usePortal();
-  const [month, setMonth] = useState(today.slice(0, 7));
   const [personId, setPersonId] = useState('');
   const [picked, setPicked] = useState<string | null>(null);
-  const [change, setChange] = useState<ChangeTarget | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const dates = monthDays(month);
-  // The grid runs Monday to Sunday, so it starts on the Monday before the 1st.
-  const from = mondayOf(dates[0]);
-  const to = addDays(mondayOf(dates.at(-1)!), 6);
-  const board = useBoard(branchId, from, to);
+  const { from, to } = monthRange(month);
   const grid = useMemo(() => Array.from({ length: (Date.parse(to) - Date.parse(from)) / 86_400_000 + 1 }, (_, i) => addDays(from, i)), [from, to]);
+  const go = (m: string) => { setPicked(null); onMonth(m); };
 
   return (
     <Card title={t('dayoff.month.title')}>
       <div className="mb-3 flex flex-wrap items-end gap-3">
         <div className="flex items-center gap-2">
-          <SmallButton onClick={() => { setPicked(null); setMonth(shiftMonth(month, -1)); }}>{t('portal.prev')}</SmallButton>
-          <SmallButton onClick={() => { setPicked(null); setMonth(today.slice(0, 7)); }}>{t('dayoff.month.this')}</SmallButton>
-          <SmallButton onClick={() => { setPicked(null); setMonth(shiftMonth(month, 1)); }}>{t('portal.next')}</SmallButton>
+          <SmallButton onClick={() => go(shiftMonth(month, -1))}>‹<span className="sr-only sm:not-sr-only"> {t('portal.prev')}</span></SmallButton>
+          <span className="min-w-20 text-center font-semibold tabular-nums">{num(month.slice(5))}/{num(month.slice(0, 4))}</span>
+          <SmallButton onClick={() => go(shiftMonth(month, 1))}><span className="sr-only sm:not-sr-only">{t('portal.next')} </span>›</SmallButton>
+          <SmallButton onClick={() => go(today.slice(0, 7))}>{t('dayoff.month.this')}</SmallButton>
         </div>
-        <span className="pb-2 font-semibold tabular-nums">{num(month.slice(5))}/{num(month.slice(0, 4))}</span>
-        <div className="w-full sm:w-64">
+        <div className="w-full sm:ml-auto sm:w-64">
           <Field label={t('dayoff.month.person')}>
             <Select value={personId} onChange={(e) => setPersonId(e.target.value)}>
               <option value="">{t('dayoff.month.everyone')}</option>
@@ -271,7 +298,6 @@ export function MonthView({ branchId, canManage, today, onChanged }: { branchId:
           </Field>
         </div>
       </div>
-      {notice ? <Notice tone="success">{notice}</Notice> : null}
       <LoadState state={board}>
         {(b) => {
           const cov = new Map(b.coverage.map((c) => [c.date, c]));
@@ -285,56 +311,89 @@ export function MonthView({ branchId, canManage, today, onChanged }: { branchId:
                 {grid.map((d) => {
                   const c = cov.get(d);
                   const inMonth = d.startsWith(month);
-                  const st = person ? dayState(b, person.id, d) : null;
-                  const short = c?.warnings.some((w) => w.kind !== 'blackout');
+                  // A day nobody at the branch has a shift (before schedules began): nothing to show.
+                  const unplanned = !b.shifts.some((s) => s.workDate === d);
+                  const editable = canManage && d >= b.today && !unplanned;
+                  const st = person && !unplanned ? dayState(b, person.id, d) : null;
+                  const short = !unplanned && c?.warnings.some((w) => w.kind !== 'blackout');
+                  const away = person || unplanned ? [] : b.people.map((p) => ({ p, st: dayState(b, p.id, d) })).filter((r) => r.st.kind === 'off' || r.st.kind === 'leave');
+                  const asked = person ? [] : b.requests.filter((r) => r.status === 'pending' && r.offDate === d);
+                  // What the add button does: with a person chosen, it changes that person's day.
+                  const add = (): ChangeTarget | null => {
+                    if (!person) return { branchId: b.branchId, people: b.people, offDate: d };
+                    if (st?.kind === 'work' && !st.shifts.some((s) => s.hasAttendance)) return { branchId: b.branchId, person, offDate: d };
+                    if (st?.kind === 'off') return { branchId: b.branchId, person, workDate: d };
+                    return null;
+                  };
+                  const target = editable ? add() : null;
+                  const shown = away.slice(0, 3);
                   return (
-                    <button
+                    <div
                       key={d}
-                      type="button"
-                      aria-pressed={picked === d}
-                      onClick={() => setPicked(picked === d ? null : d)}
-                      className={`pressable flex min-h-16 flex-col items-stretch gap-0.5 rounded-lg border p-1 text-left text-[11px] leading-tight sm:min-h-20 sm:p-1.5 ${
+                      className={`relative flex min-h-20 flex-col gap-0.5 rounded-lg border p-1 text-[11px] leading-tight sm:min-h-28 sm:p-1.5 ${
                         picked === d ? 'border-primary-strong bg-pale' : d === today ? 'border-primary-strong' : 'border-line'
                       } ${inMonth ? '' : 'opacity-50'} ${c?.blackout ? 'bg-warning-pale/60' : ''}`}
                     >
-                      <span className="flex items-center justify-between gap-1">
-                        <span className={`text-sm tabular-nums ${d === today ? 'font-semibold' : ''}`}>{num(Number(d.slice(8)))}</span>
-                        {!person && c?.pending ? <span className="rounded-full bg-warning px-1 text-[10px] font-semibold text-surface" title={t('dayoff.month.pending')}>{num(c.pending)}</span> : null}
-                      </span>
-                      {st ? <PersonDay state={st} /> : c ? (
-                        <>
-                          <span className={`tabular-nums ${short ? 'font-semibold text-danger' : 'text-ink'}`}>
-                            {short ? '⚠ ' : ''}{c.minStaff ? `${num(c.working)}/${num(c.minStaff)}` : num(c.working)}
-                            <span className="hidden sm:inline"> {t('dayoff.month.on')}</span>
+                      {/* The whole day opens its details; the add button sits above it. */}
+                      <button
+                        type="button"
+                        aria-pressed={picked === d}
+                        aria-label={day(d)}
+                        onClick={() => setPicked(picked === d ? null : d)}
+                        className="pressable absolute inset-0 rounded-lg"
+                      />
+                      <span className="pointer-events-none relative flex items-center justify-between gap-1">
+                        <span className={`whitespace-nowrap text-sm tabular-nums ${d === today ? 'font-semibold text-primary-strong' : ''}`}>{num(Number(d.slice(8)))}</span>
+                        {c && !person && !unplanned ? (
+                          // On a phone only a shortage shows; the details panel has the numbers.
+                          <span
+                            title={t('dayoff.month.legendOn')}
+                            className={`whitespace-nowrap rounded px-1 tabular-nums ${short ? 'bg-danger-pale font-semibold text-danger' : 'hidden text-muted sm:inline'}`}
+                          >
+                            {short ? '⚠' : ''}<span className={short ? 'hidden sm:inline' : ''}>{c.minStaff ? `${num(c.working)}/${num(c.minStaff)}` : num(c.working)}</span>
                           </span>
-                          <span className="text-muted tabular-nums">{t('dayoff.month.offShort', { n: num(c.off + c.onLeave) })}</span>
-                        </>
+                        ) : null}
+                      </span>
+                      <span className="pointer-events-none relative flex min-w-0 flex-col gap-0.5">
+                        {st ? <PersonDay state={st} /> : (
+                          <>
+                            {shown.map((r) => (
+                              <span
+                                key={r.p.id}
+                                className={`truncate rounded px-1 ${r.st.kind === 'off' ? 'bg-success-pale text-success' : 'bg-pale text-muted'}`}
+                              >
+                                {name(r.p)}
+                              </span>
+                            ))}
+                            {away.length > shown.length ? <span className="px-1 text-muted">{t('dayoff.month.more', { n: num(away.length - shown.length) })}</span> : null}
+                            {asked.length ? <span className="truncate rounded bg-warning-pale px-1 text-warning">{t('dayoff.month.asked', { n: num(asked.length) })}</span> : null}
+                          </>
+                        )}
+                      </span>
+                      {target ? (
+                        <button
+                          type="button"
+                          onClick={() => onChange(target)}
+                          aria-label={`${person && st?.kind === 'off' ? t('dayoff.makeWork') : t('dayoff.add')} · ${day(d)}`}
+                          className="pressable relative mt-auto min-h-6 self-start rounded border border-dashed border-primary-strong/50 px-1.5 font-semibold text-primary-strong hover:bg-primary/20"
+                        >
+                          +<span className="hidden sm:inline"> {person && st?.kind === 'off' ? t('dayoff.month.work') : t('dayoff.month.addShort')}</span>
+                        </button>
                       ) : null}
-                    </button>
+                    </div>
                   );
                 })}
               </div>
               <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
-                <li>{t('dayoff.month.legendOn')}</li>
-                <li><span className="text-danger">⚠</span> {t('dayoff.month.legendShort')}</li>
+                <li><span className="rounded bg-success-pale px-1 text-success">{t('dayoff.month.legendOff')}</span></li>
+                <li><span className="rounded bg-pale px-1">{t('dayoff.month.legendLeave')}</span></li>
+                <li><span className="rounded bg-warning-pale px-1 text-warning">{t('dayoff.month.pending')}</span></li>
+                <li>{num(5)}/{num(6)} = {t('dayoff.month.legendOn')}</li>
                 <li><span className="inline-block size-2.5 rounded-sm bg-warning-pale align-middle" /> {t('dayoff.month.legendBusy')}</li>
-                <li><span className="inline-block rounded-full bg-warning px-1 text-[10px] text-surface">1</span> {t('dayoff.month.pending')}</li>
               </ul>
               {picked ? (
-                <DayPanel
-                  board={b}
-                  date={picked}
-                  coverage={cov.get(picked)}
-                  canManage={canManage}
-                  onChange={(target) => setChange(target)}
-                />
+                <DayPanel board={b} date={picked} coverage={cov.get(picked)} canManage={canManage} onChange={onChange} />
               ) : <p className="mt-3 text-sm text-muted">{t('dayoff.month.pickDay')}</p>}
-              <DayOffDialog
-                target={change}
-                today={b.today}
-                onClose={() => setChange(null)}
-                onDone={(msg) => { setNotice(msg); board.reload(); onChanged?.(); }}
-              />
             </>
           );
         }}

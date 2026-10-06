@@ -11,9 +11,7 @@ import {
 } from '../ui';
 import type { EmployeeItem } from './Employees';
 import { PersonWeekly, WEEKDAYS, WeekdayChips, WeeklyScheduleDialog, type WeeklyRow, type WeeklyTarget } from '../WeeklySchedule';
-import {
-  ChangesCard, CoverageBadge, DayOffDialog, MonthView, RotationDialog, RulesDialog, dayState, useBoard, type ChangeTarget,
-} from '../DaysOff';
+import { allBranchStaff, CoverageBadge, DayOffDialog, dayState, useBoard, type ChangeTarget } from '../DaysOff';
 
 type Template = { id: string; nameKm: string; nameEn: string; startTime: string; endTime: string; active: boolean; overnight: boolean };
 type Assignment = {
@@ -42,19 +40,6 @@ function mondayOf(day: string): string {
 function isoWeekday(day: string): number {
   const dow = new Date(`${day}T00:00:00Z`).getUTCDay();
   return dow === 0 ? 7 : dow;
-}
-
-/** Every active employee of a branch, page by page, so branches above one page are not cut short. */
-async function allBranchStaff(branchId: string, locale: Parameters<typeof api>[1]['locale']): Promise<{ items: EmployeeItem[] }> {
-  const items: EmployeeItem[] = [];
-  for (let offset = 0; offset < 5000; offset += 200) {
-    const page = await api<{ items: EmployeeItem[]; total: number }>(
-      `/api/portal/employees?branchId=${branchId}&status=active&limit=200&offset=${offset}`, { locale },
-    );
-    items.push(...page.items);
-    if (items.length >= page.total || !page.items.length) break;
-  }
-  return { items };
 }
 
 const KIND_LOOK: Record<ShiftKind, string> = {
@@ -105,13 +90,9 @@ export function Schedule() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { errorText } = useI18n();
-  const [view, setView] = useState<'week' | 'month'>('week');
-  const board = useBoard(view === 'week' ? branchId : '', days[0], days[6]);
+  const board = useBoard(branchId, days[0], days[6]);
   const [dayOff, setDayOff] = useState<ChangeTarget | null>(null);
-  const [rulesOpen, setRulesOpen] = useState(false);
-  const [rotating, setRotating] = useState(false);
-  const [changes, setChanges] = useState(0);
-  const dayOffChanged = (msg: string) => { setNotice(msg); shifts.reload(); board.reload(); setChanges((n) => n + 1); };
+  const dayOffChanged = (msg: string) => { setNotice(msg); shifts.reload(); board.reload(); };
 
   const drafts = shifts.data?.items.filter((a) => a.status === 'draft').length ?? 0;
   const today = localDate(new Date(), timeZone);
@@ -188,9 +169,6 @@ export function Schedule() {
         title={t('nav.schedule')}
         actions={canManage ? (
           <>
-            <SmallButton onClick={() => setRulesOpen(true)}>{t('dayoff.rules.button')}</SmallButton>
-            <SmallButton onClick={() => setRotating(true)}>{t('dayoff.rotate.button')}</SmallButton>
-            <SmallButton onClick={() => setTemplating(true)}>{t('portal.sched.addTemplate')}</SmallButton>
             <SmallButton onClick={() => setAssigning(true)}>{t('portal.sched.assign')}</SmallButton>
             <SmallButton tone="primary" onClick={() => setSettingWeekly(true)}>{t('portal.weekly.set')}</SmallButton>
           </>
@@ -204,21 +182,6 @@ export function Schedule() {
             </Select>
           </Field>
         </div>
-        <div role="radiogroup" aria-label={t('dayoff.view')} className="flex rounded-lg border border-line p-0.5">
-          {(['week', 'month'] as const).map((v) => (
-            <button
-              key={v}
-              type="button"
-              role="radio"
-              aria-checked={view === v}
-              onClick={() => setView(v)}
-              className={`pressable min-h-9 rounded-md px-3 text-sm font-semibold ${view === v ? 'bg-primary text-ink' : 'text-muted hover:bg-pale'}`}
-            >
-              {t(`dayoff.view.${v}`)}
-            </button>
-          ))}
-        </div>
-        {view === 'week' ? (<>
         <div className="flex items-center gap-2">
           <SmallButton onClick={() => setWeekStart(addDays(weekStart, -7))}>{t('portal.prev')}</SmallButton>
           <SmallButton onClick={() => setWeekStart(mondayOf(today))}>{t('portal.sched.thisWeek')}</SmallButton>
@@ -230,19 +193,11 @@ export function Schedule() {
           </Field>
         </div>
         <span className="pb-2 text-sm text-muted">{day(days[0])} – {day(days[6])}</span>
-        </>) : null}
       </div>
 
       {notice ? <Notice tone="success">{notice}</Notice> : null}
       {error ? <Notice tone="danger">{error}</Notice> : null}
 
-      {view === 'month' ? (
-        <>
-          <MonthView key={branchId} branchId={branchId} canManage={canManage} today={today} onChanged={() => { shifts.reload(); setChanges((n) => n + 1); }} />
-          <ChangesCard branchId={branchId} tick={changes} />
-        </>
-      ) : null}
-      {view === 'week' ? (<>
 
       <Card title={t('portal.weekly.title')}>
         <p className="mb-3 text-sm text-muted">{t('portal.weekly.note')}</p>
@@ -347,7 +302,7 @@ export function Schedule() {
                               className={`sticky top-0 z-10 min-w-24 border-b border-line px-2 py-2 font-normal ${dt === today ? 'bg-pale font-semibold text-ink' : 'bg-surface'}`}
                             >
                               {t(WEEKDAYS[i])}<br /><span className="tabular-nums">{day(dt).slice(0, 5)}</span>
-                              {board.data?.coverage.find((c) => c.date === dt) ? (
+                              {board.data?.coverage.find((c) => c.date === dt) && board.data.shifts.some((x) => x.workDate === dt) ? (
                                 <span className="mt-1 block"><CoverageBadge c={board.data.coverage.find((c) => c.date === dt)!} /></span>
                               ) : null}
                             </th>
@@ -380,7 +335,7 @@ export function Schedule() {
                               <td key={dt} className={`border-b border-line px-1 py-2 ${dt === today ? 'bg-pale/50' : ''}`}>
                                 <div className="flex min-w-24 flex-col gap-1">
                                   {cell(p.id, dt).map(chip)}
-                                  {board.data ? <DayMark state={dayState(board.data, p.id, dt)} hasShift={cell(p.id, dt).length > 0}
+                                  {board.data?.shifts.some((x) => x.workDate === dt) ? <DayMark state={dayState(board.data, p.id, dt)} hasShift={cell(p.id, dt).length > 0}
                                     onMakeWork={canManage && dt >= today ? () => setDayOff({ branchId, person: p.who, workDate: dt }) : undefined} /> : null}
                                 </div>
                               </td>
@@ -400,9 +355,10 @@ export function Schedule() {
         </LoadState>
       </Card>
 
-      <ChangesCard branchId={branchId} tick={changes} />
-
-      <Card title={t('portal.sched.templates')}>
+      <Card
+        title={t('portal.sched.templates')}
+        actions={canManage ? <SmallButton onClick={() => setTemplating(true)}>{t('portal.sched.addTemplate')}</SmallButton> : null}
+      >
         <LoadState state={templates}>
           {(d) => d.items.length ? (
             <ul className="flex flex-col gap-2 text-sm">
@@ -422,18 +378,7 @@ export function Schedule() {
         </LoadState>
       </Card>
 
-      </>) : null}
-
       <DayOffDialog target={dayOff} today={today} onClose={() => setDayOff(null)} onDone={dayOffChanged} />
-      <RulesDialog branchId={branchId} open={rulesOpen} onClose={() => setRulesOpen(false)} onSaved={() => { setNotice(t('dayoff.rules.saved')); board.reload(); }} />
-      <RotationDialog
-        branchId={branchId}
-        open={rotating}
-        today={today}
-        staff={staff.data?.items ?? []}
-        onClose={() => setRotating(false)}
-        onDone={dayOffChanged}
-      />
       <TemplateDialog
         key={typeof templating === 'object' ? templating.id : `t${templating}`}
         open={templating !== false}
