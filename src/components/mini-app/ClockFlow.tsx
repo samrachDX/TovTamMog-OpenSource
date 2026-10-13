@@ -50,6 +50,22 @@ function browserPosition(): Promise<Position> {
  * to change it in Telegram's settings.
  */
 export function getPosition(): Promise<Position> {
+  // Tapping Clock in already read the location for the in-range check; reuse that fix for the
+  // clock that follows straight after instead of waiting on a second reading. The age stays
+  // honest, so the server still applies the branch's freshness limit.
+  if (lastFix && Date.now() - lastFix.at < REUSE_FIX_MS) {
+    return Promise.resolve({ ...lastFix.position, ageMs: lastFix.position.ageMs + Date.now() - lastFix.at });
+  }
+  return readPosition().then((position) => {
+    lastFix = { at: Date.now(), position };
+    return position;
+  });
+}
+
+const REUSE_FIX_MS = 8_000;
+let lastFix: { at: number; position: Position } | null = null;
+
+function readPosition(): Promise<Position> {
   const tg = telegram();
   const lm = tg?.isVersionAtLeast('8.0') ? tg.LocationManager : undefined;
   if (!lm) return browserPosition();

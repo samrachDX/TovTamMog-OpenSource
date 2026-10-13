@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/client/api';
 import { localHour, type MessageKey } from '@/lib/i18n';
 import { useI18n } from './i18n-context';
@@ -88,7 +88,14 @@ export function Home({ me, onClock, onRequest, onReports, onSchedule }: {
   const next = overview.nextAction;
   const { remote } = overview;
   // Checked only once they tap Clock in, so opening Home never asks for the location.
-  const { range, recheck } = useRange(choosing && next && branch ? branch.id : null);
+  // One tap: once the check finds them at the branch, go straight on to the usual way of
+  // clocking there (clock now, or the QR scanner). The choices stay for when they are not.
+  const { range, recheck } = useRange(choosing && next && branch ? branch.id : null, () => {
+    if (!next || !branch) return;
+    setChoosing(false);
+    if (noScan) onClock(next, branch.id);
+    else onClock(next);
+  });
   const away = range?.status === 'out' || range?.status === 'unknown';
   // The "I forgot" correction is for someone who is no longer at the branch and is already late:
   // past the shift start for a clock-in, past the shift end for a clock-out.
@@ -272,9 +279,12 @@ type Range =
 /**
  * Whether clocking at the branch would pass its location and network checks right now.
  * Advisory only: the clock itself checks everything again. Null while not asked.
+ * Calls onInRange when the answer is yes.
  */
-function useRange(branchId: string | null) {
+function useRange(branchId: string | null, onInRange: () => void) {
   const { locale } = useI18n();
+  const arrived = useRef(onInRange);
+  useEffect(() => { arrived.current = onInRange; });
   const [result, setResult] = useState<{ key: string; range: Range } | null>(null);
   const [tick, setTick] = useState(0);
   const key = `${branchId}|${tick}`;
@@ -283,7 +293,9 @@ function useRange(branchId: string | null) {
     let live = true;
     type Res = { inRange: boolean; gpsOk: boolean; ipOk: boolean; distanceM: number | null; requireGps: boolean };
     const settle = (r: Res) => {
-      if (live) setResult({ key, range: { status: r.inRange ? 'in' : 'out', gpsOk: r.gpsOk, ipOk: r.ipOk, distanceM: r.distanceM } });
+      if (!live) return;
+      setResult({ key, range: { status: r.inRange ? 'in' : 'out', gpsOk: r.gpsOk, ipOk: r.ipOk, distanceM: r.distanceM } });
+      if (r.inRange) arrived.current();
     };
     (async () => {
       try {
