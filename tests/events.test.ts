@@ -9,7 +9,7 @@ import { createRequest, decideRequest } from '@/lib/requests';
 import { dismissPopup, getFeed } from '@/lib/feed';
 import { listNotifications, markAllRead, unreadCount } from '@/lib/notifications';
 import { deliverOutbox, handleUpdate, type SendResult, type Sender } from '@/lib/telegram/bot';
-import { runAttendanceMaintenance } from '@/lib/attendance/maintenance';
+import { runAttendanceMaintenance, sendAttendanceNotices } from '@/lib/attendance/maintenance';
 import { initiatePinReset } from '@/lib/auth/pin';
 import { t } from '@/lib/i18n';
 import { addEmployee, addShift, createTestDb, seed, type Fixture } from './helpers/db';
@@ -115,9 +115,14 @@ describe('events and announcements', () => {
     const d = await getDashboard(db, await loadActor(db, hr, { now: later }), { date: '2026-10-11' });
     expect(d.totals.absent).toBe(0);
     expect((d.upcomingEvents as unknown[]).length).toBe(1);
-    expect(await runAttendanceMaintenance(db, { now: later })).toMatchObject({ absences: 1 });
+    expect(await runAttendanceMaintenance(db, { now: later })).toMatchObject({ absences: 1, notices: 0 });
     const absent = await db.query<{ d: string }>(`select work_date::text as d from attendance_records where status = 'absent'`);
     expect(absent).toEqual([{ d: '2026-10-13' }]);
+    // Found at 19:00 Phnom Penh time; the message waits for the default 07:00 next morning.
+    expect((await inbox(f.employeeId))[0]).not.toMatchObject({ kind: 'absent_recorded' });
+    expect(await sendAttendanceNotices(db, new Date('2026-10-13T23:55:00Z'))).toBe(0);
+    expect(await sendAttendanceNotices(db, new Date('2026-10-14T00:00:00Z'))).toBe(1);
+    expect(await sendAttendanceNotices(db, new Date('2026-10-14T00:05:00Z'))).toBe(0);
     expect((await inbox(f.employeeId))[0]).toMatchObject({ kind: 'absent_recorded', readAt: null });
     expect((await inbox(f.employeeId))[0].bodyKm).toContain('13/10/2026');
   });

@@ -3,16 +3,16 @@
 import { useState } from 'react';
 import { api } from '@/lib/client/api';
 import { useI18n } from '@/components/mini-app/i18n-context';
-import { Card, Notice, Check, Field, LoadState, PageHeader, Select, SmallButton, useLoad } from '../ui';
+import { Card, Notice, Check, Field, LoadState, PageHeader, Select, SmallButton, TextInput, useLoad } from '../ui';
 
 type RequestType = 'leave' | 'absence' | 'overtime' | 'out_of_office' | 'business_trip' | 'shift_swap' | 'day_off';
-type Settings = { nightShifts: boolean; pinRememberDays: number; requestTypes: RequestType[] };
+type Settings = { nightShifts: boolean; pinRememberDays: number; requestTypes: RequestType[]; attendanceNoticeTime: string | null };
 
 const REQUEST_TYPES: RequestType[] = ['leave', 'day_off', 'absence', 'overtime', 'out_of_office', 'business_trip', 'shift_swap'];
 
 const REMEMBER_DAYS = [0, 1, 3, 7, 14, 30];
 
-/** Organization-wide switches: night shifts and how long the Mini App stays signed in. */
+/** Organization-wide switches: night shifts, Mini App sign-in, request kinds and when attendance messages go out. */
 export function Settings() {
   const { t, locale } = useI18n();
   const state = useLoad(() => api<Settings>('/api/portal/settings', { locale }), []);
@@ -62,6 +62,26 @@ function SettingsForm({ initial }: { initial: Settings }) {
             ))}
           </Select>
         </Field>
+      </Card>
+      <Card title={t('settings.notice.title')}>
+        <p className="mb-2 text-sm text-muted">{t('settings.notice.body')}</p>
+        <Check
+          label={t('settings.notice.immediate')}
+          checked={form.attendanceNoticeTime === null}
+          onChange={(v) => { setSaved(false); setForm({ ...form, attendanceNoticeTime: v ? null : '07:00' }); }}
+        />
+        {form.attendanceNoticeTime !== null ? (
+          <div className="max-w-48">
+            <Field label={t('settings.notice.time')} hint={t('settings.notice.hint')}>
+              <TextInput
+                type="time"
+                required
+                value={form.attendanceNoticeTime}
+                onChange={(e) => { setSaved(false); setForm({ ...form, attendanceNoticeTime: e.target.value }); }}
+              />
+            </Field>
+          </div>
+        ) : null}
       </Card>
       <Card title={t('settings.requests.title')}>
         <p className="mb-2 text-sm text-muted">{t('settings.requests.body')}</p>

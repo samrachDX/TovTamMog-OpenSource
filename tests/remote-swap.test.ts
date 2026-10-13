@@ -5,6 +5,7 @@ import { cancelMyRequest, createRequest, createRequestFor, decideRequest, listMy
 import { getSettings, updateSettings } from '@/lib/admin/settings';
 import { myMonth } from '@/lib/attendance/month';
 import { sendClockReminders } from '@/lib/attendance/reminders';
+import { runAttendanceChecks, sendAttendanceNotices } from '@/lib/attendance/maintenance';
 import { getProfile, updatePreferences } from '@/lib/profile';
 import { clock, type ClockInput } from '@/lib/attendance/engine';
 import { getTodayOverview } from '@/lib/attendance/overview';
@@ -234,5 +235,44 @@ describe('clock reminders', () => {
     // Too late to be useful: skipped.
     await updatePreferences(db, f.employeeId, { clockOutReminder: 10 });
     expect((await sendClockReminders(db, day(28, 9, 40))).clockOut).toBe(0);
+  });
+});
+
+describe('when absence messages go out', () => {
+  it('follows the time set in Settings, or sends straight away without one', async () => {
+    const adminId = await addEmployee(db, f.orgId, 'ADM2', [f.branchId]);
+    await db.query(`insert into role_assignments (employee_id, role_key) values ($1, 'org_admin')`, [adminId]);
+    const admin = await loadActor(db, { employeeId: adminId, orgId: f.orgId }, { now: day(40) });
+    expect((await getSettings(db, f.orgId)).attendanceNoticeTime).toBe('07:00');
+    await expect(updateSettings(db, admin, { attendanceNoticeTime: '25:00' })).rejects.toThrow('VALIDATION');
+    await expect(updateSettings(db, manager, { attendanceNoticeTime: '08:00' })).rejects.toThrow();
+    expect((await updateSettings(db, admin, { attendanceNoticeTime: '18:30' })).attendanceNoticeTime).toBe('18:30');
+
+    // Clears whatever earlier tests left behind.
+    await runAttendanceChecks(db, { now: day(40) });
+    await sendAttendanceNotices(db, day(40, 23));
+    const absences = () => db.query(`select 1 from notifications where employee_id = $1 and kind = 'absent_recorded'`, [f.employeeId]);
+    const before = (await absences()).length;
+    // Shift 08:00 to 12:00 Phnom Penh time; the absence is found at 13:05, before 18:30 the same day.
+    await addShift(db, f, day(40), day(40, 5));
+    expect(await runAttendanceChecks(db, { now: day(40, 6, 5) })).toMatchObject({ absences: 1, notices: 0 });
+    expect(await runAttendanceChecks(db, { now: day(40, 11, 25) })).toMatchObject({ notices: 0 });
+    expect(await runAttendanceChecks(db, { now: day(40, 11, 30) })).toMatchObject({ notices: 1 });
+    expect((await absences()).length).toBe(before + 1);
+
+    // A record corrected before the time comes gets no message.
+    await addShift(db, f, day(41), day(41, 5));
+    expect(await runAttendanceChecks(db, { now: day(41, 6, 5) })).toMatchObject({ absences: 1 });
+    await db.query(
+      `update attendance_records set status = 'completed', clock_in_at = $2, clock_out_at = $3 where work_date = '2026-11-10' and employee_id = $1`,
+      [f.employeeId, day(41), day(41, 5)],
+    );
+    expect(await runAttendanceChecks(db, { now: day(41, 12) })).toMatchObject({ notices: 0 });
+
+    await updateSettings(db, admin, { attendanceNoticeTime: null });
+    expect((await getSettings(db, f.orgId)).attendanceNoticeTime).toBeNull();
+    await addShift(db, f, day(42), day(42, 5));
+    expect(await runAttendanceChecks(db, { now: day(42, 6, 5) })).toMatchObject({ absences: 1, notices: 1 });
+    await updateSettings(db, admin, { attendanceNoticeTime: '07:00' });
   });
 });
