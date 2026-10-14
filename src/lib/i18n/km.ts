@@ -1,6 +1,6 @@
 /** Khmer is the source dictionary: its keys define MessageKey. */
 export const km = {
-  'app.name': 'តោះតាមម៉ោង',
+  'app.name': 'ទៅតាមម៉ោង',
   'app.tagline': 'ប្រព័ន្ធកត់ត្រាវត្តមានបុគ្គលិក',
 
   'common.loading': 'កំពុងដំណើរការ…',

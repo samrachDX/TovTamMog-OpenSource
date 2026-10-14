@@ -24,7 +24,7 @@ const optionalText = (max: number) =>
   z.preprocess((v) => (typeof v === 'string' && !v.trim() ? undefined : v), z.string().trim().max(max).optional());
 
 export const setupInput = z.object({
-  orgKm: text(120).default('តោះតាមម៉ោង'),
+  orgKm: text(120).default('ទៅតាមម៉ោង'),
   orgEn: text(120).default('Tov Tam Mog'),
   branchCode: z.string().trim().regex(/^[A-Za-z0-9_-]{1,20}$/),
   branchKm: text(120),

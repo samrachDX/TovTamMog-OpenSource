@@ -70,7 +70,7 @@ function Wizard() {
 function Form({ yourIp, onDone }: { yourIp: string | null; onDone(r: Result): void }) {
   const { t } = useI18n();
   const [v, setV] = useState({
-    setupKey: '', orgKm: 'តោះតាមម៉ោង', orgEn: 'Tov Tam Mog',
+    setupKey: '', orgKm: 'ទៅតាមម៉ោង', orgEn: 'Tov Tam Mog',
     branchCode: '', branchKm: '', branchEn: '', lat: '', lon: '', ip: '',
     adminCode: 'A001', adminKm: '', adminEn: '',
   });

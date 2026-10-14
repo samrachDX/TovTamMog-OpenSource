@@ -1,4 +1,4 @@
-# TovTamMog (តោះតាមម៉ោង)
+# TovTamMog (ទៅតាមម៉ោង)
 
 Free, open source employee attendance for restaurants and shops with one or more branches.
 Staff clock in and out from Telegram by scanning the branch QR code; managers and HR use a
@@ -160,7 +160,7 @@ append-only (trigger-enforced).
   job; with the job running once a day, a message that failed the first time can be late.
   If someone blocks the bot they stop getting messages but still see everything in the app.
 - **Khmer wording** in `src/lib/i18n/km.ts` needs review by a fluent Khmer speaker before
-  production, including the Khmer spelling of the app name.
+  production. The app name in Khmer is ទៅតាមម៉ោង.
 - **Docker installs** put Caddy in front of the app. Caddy passes the visitor's IP to the app
   through the same secret-protected header mechanism used for Cloudflare
   (`TRUSTED_PROXY=cloudflare` with a shared secret), so the app port is never exposed directly.

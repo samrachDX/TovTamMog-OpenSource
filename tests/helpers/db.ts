@@ -66,7 +66,7 @@ export type Fixture = {
 
 export async function seed(db: Db): Promise<Fixture> {
   const [org] = await db.query<{ id: string }>(
-    `insert into organizations (name_km, name_en) values ('តោះតាមម៉ោង', 'Tov Tam Mog') returning id`,
+    `insert into organizations (name_km, name_en) values ('ទៅតាមម៉ោង', 'Tov Tam Mog') returning id`,
   );
   await db.query(
     `insert into employee_categories (org_id, key, name_km, name_en) values ($1, 'waiter', 'អ្នករត់តុ', 'Waiter'), ($1, 'other', 'ផ្សេងៗ', 'Other')`,
