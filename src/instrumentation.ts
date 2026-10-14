@@ -6,6 +6,12 @@ export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
   const { env } = await import('@/lib/env');
   const e = env();
+  if (process.env.AUTO_MIGRATE === 'true') {
+    // The Docker image brings the database up to date before serving anything.
+    const { runMigrations } = await import('@/lib/db/migrate');
+    const { join } = await import('node:path');
+    await runMigrations(e.DATABASE_URL, join(process.cwd(), 'supabase', 'migrations'), (line) => console.log(`[migrate] ${line}`));
+  }
   if (process.env.NODE_ENV !== 'production') return;
   const warn = (text: string) => console.warn(`[config] ${text}`);
   if (e.TRUSTED_PROXY === 'none') warn('TRUSTED_PROXY is none: branch network checks always fail and IP rate limits are off.');

@@ -28,6 +28,8 @@ function csp(evalAllowed: boolean): string {
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // The Docker image sets NEXT_OUTPUT=standalone for a small self-contained server.
+  ...(process.env.NEXT_OUTPUT === 'standalone' ? { output: 'standalone' as const } : {}),
   // Native / Node-only packages must not be bundled.
   serverExternalPackages: ['@node-rs/argon2', 'pg'],
   async headers() {

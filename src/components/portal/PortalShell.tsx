@@ -254,7 +254,14 @@ function Gate({ children }: { children: ReactNode }) {
 function LoginWidget({ onAuth }: { onAuth(user: Record<string, unknown>): void }) {
   const { t } = useI18n();
   const ref = useRef<HTMLDivElement>(null);
-  const bot = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME;
+  // Undefined while asking the server which bot to use; null when none is available.
+  const [bot, setBot] = useState<string | null | undefined>(process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME || undefined);
+  useEffect(() => {
+    if (bot !== undefined) return;
+    fetch('/api/auth/telegram-login', { cache: 'no-store' })
+      .then((res) => (res.ok ? (res.json() as Promise<{ bot: string | null }>) : { bot: null }))
+      .then((r) => setBot(r.bot), () => setBot(null));
+  }, [bot]);
   const handler = useRef(onAuth);
   useEffect(() => {
     handler.current = onAuth;
@@ -274,6 +281,7 @@ function LoginWidget({ onAuth }: { onAuth(user: Record<string, unknown>): void }
     return () => host.replaceChildren();
   }, [bot]);
 
+  if (bot === undefined) return <div className="min-h-12" />;
   if (!bot) return <Notice tone="warning">{t('portal.auth.signIn.unavailable')}</Notice>;
   return <div ref={ref} className="min-h-12" />;
 }

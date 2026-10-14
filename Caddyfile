@@ -1,0 +1,10 @@
+# Caddy gets and renews the HTTPS certificate for DOMAIN automatically. The domain's DNS
+# A record must point at this server, and ports 80 and 443 must be open.
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy app:3000 {
+		# Overwrite, never pass on, whatever the visitor sent in these headers.
+		header_up CF-Connecting-IP {remote_host}
+		header_up X-Origin-Secret {$PROXY_SECRET}
+	}
+}

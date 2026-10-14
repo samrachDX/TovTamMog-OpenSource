@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "npm run check:i18n && next build",
+    "vercel-build": "npm run db:migrate && npm run build",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",

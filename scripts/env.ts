@@ -9,3 +9,6 @@ for (const file of ['.env.local', '.env']) {
     /* file not present */
   }
 }
+
+// Vercel's Supabase integration names the connection string POSTGRES_URL.
+if (!process.env.DATABASE_URL?.trim() && process.env.POSTGRES_URL?.trim()) process.env.DATABASE_URL = process.env.POSTGRES_URL;

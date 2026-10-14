@@ -1,0 +1,88 @@
+# Everything TovTamMog needs on one server: the app, its database, automatic HTTPS and the
+# scheduled jobs. `./setup.sh` writes the .env file this reads and starts it for you.
+#
+#   docker compose up -d --build     start or update
+#   docker compose logs -f app       watch the app
+#   docker compose down              stop (data is kept in the db-data volume)
+
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tovtammog
+      POSTGRES_DB: tovtammog
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run ./setup.sh first}
+    # The app always encrypts connections to a database that is not on localhost, so the
+    # database serves TLS with the certificate that ships in the image.
+    command: >
+      postgres -c ssl=on
+      -c ssl_cert_file=/etc/ssl/certs/ssl-cert-snakeoil.pem
+      -c ssl_key_file=/etc/ssl/private/ssl-cert-snakeoil.key
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tovtammog -d tovtammog"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://tovtammog:${POSTGRES_PASSWORD}@db:5432/tovtammog
+      # The database is on this machine's private Docker network, with a self-signed certificate.
+      DATABASE_TLS_UNVERIFIED: "true"
+      APP_URL: https://${DOMAIN:?run ./setup.sh first}
+      # Caddy below is the only way in. It adds the shared PROXY_SECRET and the visitor's
+      # IP on every request, using the app's existing trusted-edge header mechanism.
+      TRUSTED_PROXY: cloudflare
+      CLOUDFLARE_ORIGIN_SECRET: ${PROXY_SECRET:?run ./setup.sh first}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN}
+      PROXY_SECRET: ${PROXY_SECRET}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+
+  # Clock reminders every 5 minutes; missed clock-outs, absences and message retries every 15.
+  cron:
+    image: curlimages/curl:8.11.1
+    restart: unless-stopped
+    environment:
+      CRON_SECRET: ${CRON_SECRET:?run ./setup.sh first}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        i=0
+        while true; do
+          sleep 300
+          curl -fsS -o /dev/null -H "Authorization: Bearer $$CRON_SECRET" http://app:3000/api/internal/reminders || echo "reminders failed"
+          if [ $$((i % 3)) -eq 0 ]; then
+            curl -fsS -o /dev/null -H "Authorization: Bearer $$CRON_SECRET" http://app:3000/api/internal/attendance-check || echo "attendance-check failed"
+          fi
+          i=$$((i + 1))
+        done
+    depends_on:
+      - app
+
+volumes:
+  db-data:
+  caddy-data:
+  caddy-config:

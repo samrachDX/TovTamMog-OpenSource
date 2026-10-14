@@ -47,11 +47,30 @@ export function parseEnv(source: Record<string, string | undefined>) {
   return schema.safeParse(source);
 }
 
+/**
+ * Fills settings the host already knows, so a fresh deployment needs fewer of them:
+ * - DATABASE_URL defaults to POSTGRES_URL, which Vercel's Supabase integration sets.
+ * - On Vercel the trusted header is known, so forgetting TRUSTED_PROXY cannot switch off
+ *   IP checks and limits, and APP_URL defaults to the project's production domain.
+ *   Elsewhere a blank TRUSTED_PROXY means none.
+ */
+export function withHostDefaults(source: Record<string, string | undefined>): Record<string, string | undefined> {
+  const out = { ...source };
+  const blank = (k: string) => !out[k]?.trim();
+  if (blank('DATABASE_URL') && !blank('POSTGRES_URL')) out.DATABASE_URL = out.POSTGRES_URL;
+  if (out.VERCEL) {
+    if (blank('TRUSTED_PROXY')) out.TRUSTED_PROXY = 'vercel';
+    if (blank('APP_URL') && !blank('VERCEL_PROJECT_PRODUCTION_URL')) out.APP_URL = out.VERCEL_PROJECT_PRODUCTION_URL;
+  } else if (blank('TRUSTED_PROXY')) {
+    // Anywhere else a blank setting means no trusted header, as if it were not there.
+    delete out.TRUSTED_PROXY;
+  }
+  return out;
+}
+
 export function env(): Env {
   if (!cached) {
-    // On Vercel the trusted header is known, so forgetting the setting cannot switch off IP checks and limits.
-    const source = !process.env.TRUSTED_PROXY?.trim() && process.env.VERCEL ? { ...process.env, TRUSTED_PROXY: 'vercel' } : process.env;
-    const parsed = schema.safeParse(source);
+    const parsed = schema.safeParse(withHostDefaults(process.env));
     if (!parsed.success) {
       const issues = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
       throw new Error(`Invalid environment configuration: ${issues}`);

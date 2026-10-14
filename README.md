@@ -1,10 +1,47 @@
-# Tov Tam Mog Attendance Mini App
+# TovTamMog (តោះតាមម៉ោង)
 
-Khmer-first employee attendance for multi-branch restaurants: a Telegram Mini App for
-staff, with an Admin/HR portal to follow. Next.js (App Router, TypeScript), Supabase
-PostgreSQL, Telegram Bot API, hosted on Vercel.
+Free, open source employee attendance for restaurants and shops with one or more branches.
+Staff clock in and out from Telegram by scanning the branch QR code; managers and HR use a
+web portal for schedules, leave, requests and reports. Khmer first, with English.
 
-## Status
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FsamrachDX%2FTovTamMog&project-name=tovtammog&repository-name=tovtammog&env=DATABASE_URL,TELEGRAM_BOT_TOKEN,APP_SECRET,CRON_SECRET,TELEGRAM_WEBHOOK_SECRET&envDescription=Your%20database%20connection%20string%2C%20your%20bot%20token%20and%20three%20random%20secrets&envLink=https%3A%2F%2Fgithub.com%2FsamrachDX%2FTovTamMog%2Fblob%2Fmain%2Fdocs%2Fdeploy-vercel.md)
+
+Built with Next.js (TypeScript), PostgreSQL and the Telegram Bot API. MIT licensed.
+
+## Quick start
+
+You need a Telegram bot (free, about one minute) and somewhere to run the app. Pick one:
+
+| | **A. Vercel + Supabase** | **B. Your own server (Docker)** |
+| --- | --- | --- |
+| Best for | No server to look after | Full control, data on your machine |
+| Cost | Free tiers are enough to start | A small VPS (about $5/month) and a domain |
+| Steps | Click the button above, paste 5 values | Run one command, answer 2 questions |
+| Guide | [docs/deploy-vercel.md](docs/deploy-vercel.md) | [docs/deploy-docker.md](docs/deploy-docker.md) |
+
+Either way you finish in the browser: open `https://<your-domain>/setup`, enter your setup
+key, and fill in your company, first branch and your own name. The page connects the bot
+and gives you your enrollment code and the branch QR code to print. No command line needed.
+
+### Make a Telegram bot
+
+1. In Telegram, open [@BotFather](https://t.me/BotFather) and send `/newbot`.
+2. Choose a name and a username ending in `bot`.
+3. Copy the token it sends you (it looks like `123456789:AAH...`). Keep it secret.
+
+### Option B in one command
+
+On a Linux server with a domain pointing at it:
+
+```bash
+git clone https://github.com/samrachDX/TovTamMog.git && cd TovTamMog && ./setup.sh
+```
+
+The script installs nothing on its own. It checks Docker is there, asks for your domain and
+bot token, creates every other secret, and starts the app, database, HTTPS certificate and
+scheduled jobs.
+
+## Features
 
 Built and tested:
 
@@ -62,20 +99,9 @@ Not built yet: employee import/export, branch logos and event images,
 editing shift templates, second-approver flow for high-risk changes, leave types and
 balances, scheduled (future-dated) publishing of events.
 
-## Setup
+## Developing
 
-1. `npm install`
-2. Copy `.env.example` to `.env.local` and fill it in.
-3. `npm run db:migrate` — applies `supabase/migrations` (or use `supabase db push`).
-4. `npm run bootstrap -- …` creates the organization, first branch and first
-   administrator, and prints an enrollment code and the branch QR content. The
-   arguments are listed at the top of `scripts/bootstrap.ts`.
-5. In @BotFather set the bot's Mini App URL to the deployed domain.
-6. Set `TELEGRAM_WEBHOOK_SECRET` and `APP_URL`, deploy, then run `npm run bot:setup` once to
-   register the webhook, the menu button and the /start command.
-7. `npm run dev`
-
-## Commands
+See [CONTRIBUTING.md](CONTRIBUTING.md) for a local setup, the test suite and conventions.
 
 | Command | Purpose |
 | --- | --- |
@@ -84,8 +110,9 @@ balances, scheduled (future-dated) publishing of events.
 | `npm test` | Unit and integration tests (in-memory Postgres via PGlite) |
 | `npm run typecheck` / `npm run lint` | Static checks |
 | `npm run check:i18n` | Khmer/English completeness check |
-| `npm run db:migrate` | Apply pending SQL migrations |
-| `npm run bootstrap` | First-time organization setup |
+| `npm run db:migrate` | Apply pending SQL migrations (Vercel runs this on every deploy) |
+| `npm run bootstrap` | First-time organization setup from the command line (the `/setup` page does the same) |
+| `npm run bot:setup` | Register the bot webhook and menu button again (the `/setup` page does this once) |
 
 ## How attendance is decided
 
@@ -134,18 +161,30 @@ append-only (trigger-enforced).
   If someone blocks the bot they stop getting messages but still see everything in the app.
 - **Khmer wording** in `src/lib/i18n/km.ts` needs review by a fluent Khmer speaker before
   production, including the Khmer spelling of the app name.
+- **Docker installs** put Caddy in front of the app. Caddy passes the visitor's IP to the app
+  through the same secret-protected header mechanism used for Cloudflare
+  (`TRUSTED_PROXY=cloudflare` with a shared secret), so the app port is never exposed directly.
+  The scheduled jobs run every 5 and 15 minutes from the `cron` container.
 
 ## Layout
 
 ```
 supabase/migrations/   SQL migrations
-scripts/               migrate, bootstrap, i18n check
+scripts/               migrate, bootstrap, bot setup, i18n check
 src/app/               pages and /api route handlers
 src/components/        Mini App screens and portal screens
 src/lib/admin/         portal services: employees, branches, schedule, attendance review
 src/lib/attendance/    engine, IP allowlist, geofence, QR, home overview
 src/lib/auth/          sessions, enrollment, PIN, permissions, rate limiting
 src/lib/i18n/          Khmer (source) and English dictionaries, formatting
-src/lib/telegram/      initData validation
+src/lib/telegram/      initData validation, bot messages and registration
+src/lib/setup.ts       first-time setup used by /setup and npm run bootstrap
+docs/                  deployment guides
 tests/                 unit and integration tests
 ```
+
+## Contributing, security and license
+
+- Contributions are welcome: read [CONTRIBUTING.md](CONTRIBUTING.md).
+- Found a security problem? Please report it privately as described in [SECURITY.md](SECURITY.md).
+- Released under the [MIT License](LICENSE).
