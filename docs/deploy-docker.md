@@ -21,8 +21,8 @@ Connect to the server and run:
 curl -fsSL https://get.docker.com | sh
 
 # TovTamMog
-git clone https://github.com/samrachDX/TovTamMog.git
-cd TovTamMog
+git clone https://github.com/samrachDX/TovTamMog-OpenSource.git
+cd TovTamMog-OpenSource
 ./setup.sh
 ```
 
@@ -43,7 +43,7 @@ bot and enter your domain.
 
 ## Everyday commands
 
-Run these in the `TovTamMog` folder.
+Run these in the `TovTamMog-OpenSource` folder.
 
 | Task | Command |
 | --- | --- |

@@ -4,7 +4,7 @@ Free, open source employee attendance for restaurants and shops with one or more
 Staff clock in and out from Telegram by scanning the branch QR code; managers and HR use a
 web portal for schedules, leave, requests and reports. Khmer first, with English.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FsamrachDX%2FTovTamMog&project-name=tovtammog&repository-name=tovtammog&env=DATABASE_URL,TELEGRAM_BOT_TOKEN,APP_SECRET,CRON_SECRET,TELEGRAM_WEBHOOK_SECRET&envDescription=Your%20database%20connection%20string%2C%20your%20bot%20token%20and%20three%20random%20secrets&envLink=https%3A%2F%2Fgithub.com%2FsamrachDX%2FTovTamMog%2Fblob%2Fmain%2Fdocs%2Fdeploy-vercel.md)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FsamrachDX%2FTovTamMog-OpenSource&project-name=tovtammog&repository-name=tovtammog&env=DATABASE_URL,TELEGRAM_BOT_TOKEN,APP_SECRET,CRON_SECRET,TELEGRAM_WEBHOOK_SECRET&envDescription=Your%20database%20connection%20string%2C%20your%20bot%20token%20and%20three%20random%20secrets&envLink=https%3A%2F%2Fgithub.com%2FsamrachDX%2FTovTamMog-OpenSource%2Fblob%2Fmain%2Fdocs%2Fdeploy-vercel.md)
 
 Built with Next.js (TypeScript), PostgreSQL and the Telegram Bot API. MIT licensed.
 
@@ -34,7 +34,7 @@ and gives you your enrollment code and the branch QR code to print. No command l
 On a Linux server with a domain pointing at it:
 
 ```bash
-git clone https://github.com/samrachDX/TovTamMog.git && cd TovTamMog && ./setup.sh
+git clone https://github.com/samrachDX/TovTamMog-OpenSource.git && cd TovTamMog-OpenSource && ./setup.sh
 ```
 
 The script installs nothing on its own. It checks Docker is there, asks for your domain and

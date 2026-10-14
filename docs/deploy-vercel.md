@@ -32,7 +32,7 @@ numbers only, 40 characters), or run `openssl rand -hex 24` if you have a termin
 
 Press the button and sign in with GitHub:
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FsamrachDX%2FTovTamMog&project-name=tovtammog&repository-name=tovtammog&env=DATABASE_URL,TELEGRAM_BOT_TOKEN,APP_SECRET,CRON_SECRET,TELEGRAM_WEBHOOK_SECRET&envDescription=Your%20database%20connection%20string%2C%20your%20bot%20token%20and%20three%20random%20secrets&envLink=https%3A%2F%2Fgithub.com%2FsamrachDX%2FTovTamMog%2Fblob%2Fmain%2Fdocs%2Fdeploy-vercel.md)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FsamrachDX%2FTovTamMog-OpenSource&project-name=tovtammog&repository-name=tovtammog&env=DATABASE_URL,TELEGRAM_BOT_TOKEN,APP_SECRET,CRON_SECRET,TELEGRAM_WEBHOOK_SECRET&envDescription=Your%20database%20connection%20string%2C%20your%20bot%20token%20and%20three%20random%20secrets&envLink=https%3A%2F%2Fgithub.com%2FsamrachDX%2FTovTamMog-OpenSource%2Fblob%2Fmain%2Fdocs%2Fdeploy-vercel.md)
 
 Vercel copies the code into your GitHub account and asks for five values: paste the
 database connection string, the bot token and the three secrets, then press **Deploy**.
@@ -68,5 +68,5 @@ bot and enter your domain (for example `tovtammog.vercel.app`).
 ## Updating
 
 Your copy of the code lives in your GitHub account. To get new versions, open it on GitHub
-and press **Sync fork** (or merge the changes from `samrachDX/TovTamMog`). Vercel redeploys
+and press **Sync fork** (or merge the changes from `samrachDX/TovTamMog-OpenSource`). Vercel redeploys
 and applies any new database changes automatically.
