@@ -25,6 +25,7 @@ export function authConfig(): AuthConfig {
 /**
  * The client's public IP, taken only from the header the configured edge sets itself.
  * - vercel: `x-real-ip`. Vercel overwrites it on every request, so a client cannot forge it.
+ *   Anywhere else the header is ignored, because there a client can send it themselves.
  * - cloudflare: `cf-connecting-ip`, only when the request carries the CLOUDFLARE_ORIGIN_SECRET
  *   that a Cloudflare Transform Rule adds; anyone reaching the origin directly could set it.
  * - none: no header is trusted. In development DEV_CLIENT_IP may stand in.
@@ -33,7 +34,8 @@ export function authConfig(): AuthConfig {
 export function clientIp(req: Request): string | null {
   const e = env();
   let raw: string | null = null;
-  if (e.TRUSTED_PROXY === 'vercel') raw = req.headers.get('x-real-ip');
+  // Off Vercel nothing overwrites x-real-ip, so a client could pick their own address.
+  if (e.TRUSTED_PROXY === 'vercel') raw = onVercel() ? req.headers.get('x-real-ip') : null;
   else if (e.TRUSTED_PROXY === 'cloudflare') raw = fromCloudflare(req, e.CLOUDFLARE_ORIGIN_SECRET) ? req.headers.get('cf-connecting-ip') : null;
   else if (process.env.NODE_ENV !== 'production') raw = e.DEV_CLIENT_IP ?? null;
   if (!raw) return null;
@@ -149,6 +151,11 @@ export function flushOutbox(): void {
       console.error('[telegram] outbox delivery failed', err instanceof Error ? err.message : err);
     }
   });
+}
+
+/** Vercel sets VERCEL on its own servers. Outside production the setting is trusted as is, for tests and local runs. */
+function onVercel(): boolean {
+  return !!process.env.VERCEL || process.env.NODE_ENV !== 'production';
 }
 
 /** The request passed through Cloudflare: it carries the secret our Transform Rule adds. */

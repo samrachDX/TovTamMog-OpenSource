@@ -2,6 +2,7 @@ import { db } from '@/lib/db';
 import { AppError } from '@/lib/errors';
 import { UUID, scopeOf } from '@/lib/admin/actor';
 import { FILE_KINDS, deleteEmployeeFile, getEmployeeFile, saveEmployeeFile, type FileKind } from '@/lib/admin/files';
+import { FILE_CSP } from '@/lib/attachments-http';
 import { handle, json, portalActor, readBody } from '@/lib/http';
 
 type Ctx = { params: Promise<{ id: string; kind: string }> };
@@ -23,6 +24,7 @@ export function GET(req: Request, ctx: Ctx) {
         'Cache-Control': kind === 'photo' ? 'private, max-age=300' : 'no-store',
         'Content-Disposition': 'inline',
         'X-Content-Type-Options': 'nosniff',
+        'Content-Security-Policy': FILE_CSP,
       },
     });
   });
