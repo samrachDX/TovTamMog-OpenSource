@@ -1,0 +1,144 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #65a9ed;
+  --color-primary-strong: #4a94e0;
+  --color-pale: #eaf5ff;
+  --color-surface: #ffffff;
+  --color-ink: #243b53;
+  --color-muted: #627d98;
+  --color-line: #d9e2ec;
+  --color-success: #1f7a4d;
+  --color-success-pale: #e6f4ec;
+  --color-danger: #b42318;
+  --color-danger-pale: #fdecea;
+  --color-warning: #8a5a00;
+  --color-warning-pale: #fff4dc;
+
+  --font-sans: "Lexend Variable", "Lexend", "Kantumruy Pro Variable", "Kantumruy Pro", "Khmer OS Battambang", "Khmer OS",
+    system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+html {
+  background: var(--color-surface);
+  color: var(--color-ink);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  /* Khmer stacks marks above and below the baseline; tight leading clips them. */
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+button,
+input {
+  font: inherit;
+  line-height: 1.6;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-ink);
+  outline-offset: 2px;
+}
+
+.pressable {
+  transition: transform 90ms ease-out, background-color 120ms ease-out;
+}
+.pressable:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+/*
+ * `backwards`, not `both`: a transform kept after the animation ends turns the screen into the
+ * containing block for position: fixed children, so the bottom tab bar would scroll away with
+ * the page instead of staying on the viewport.
+ */
+.screen-enter {
+  animation: fade-up 180ms ease-out backwards;
+}
+
+/* The portal's navigation drawer on phones and tablets. */
+.drawer-in {
+  animation: drawer-in 200ms ease-out backwards;
+}
+@keyframes drawer-in {
+  from { transform: translateX(-100%); }
+}
+
+@keyframes pop {
+  0% { transform: scale(0.6); opacity: 0; }
+  70% { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); }
+}
+@keyframes draw {
+  to { stroke-dashoffset: 0; }
+}
+.success-mark {
+  animation: pop 320ms ease-out both;
+}
+.success-mark path {
+  stroke-dasharray: 30;
+  stroke-dashoffset: 30;
+  animation: draw 260ms 200ms ease-out forwards;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.spinner {
+  animation: spin 800ms linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pressable,
+  .screen-enter,
+  .drawer-in,
+  .success-mark,
+  .success-mark path {
+    animation: none;
+    transition: none;
+  }
+  .success-mark path {
+    stroke-dashoffset: 0;
+  }
+  .spinner {
+    animation-duration: 2.4s;
+  }
+}
+
+@keyframes confetti-fall {
+  0% { transform: translateY(-12px) rotate(0deg); opacity: 0; }
+  15% { opacity: 1; }
+  100% { transform: translateY(88px) rotate(300deg); opacity: 0; }
+}
+.confetti {
+  opacity: 0;
+  animation: confetti-fall 1400ms ease-in 2 both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .confetti {
+    animation: none;
+  }
+}
+
+/* Report printing: only the report document is printed, on A4. */
+.print-root {
+  display: none;
+}
+@media print {
+  body.printing > :not(.print-root) {
+    display: none !important;
+  }
+  body.printing .print-root {
+    display: block;
+  }
+  body.printing {
+    background: #fff;
+  }
+}
