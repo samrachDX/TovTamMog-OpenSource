@@ -140,7 +140,7 @@ append-only (trigger-enforced).
   IP from the ISP avoids this. Staff on mobile data will always be refused when the IP
   check is on.
 - **Client IP source.** `TRUSTED_PROXY=vercel` reads `x-real-ip`, which Vercel sets
-  itself. With Cloudflare in front, use `cloudflare` and set `CLOUDFLARE_ORIGIN_SECRET`,
+  itself; on any other host the header is ignored, since clients could set it themselves. With Cloudflare in front, use `cloudflare` and set `CLOUDFLARE_ORIGIN_SECRET`,
   added by a Cloudflare Transform Rule as the `x-origin-secret` request header; without
   it `cf-connecting-ip` is ignored, because it could be forged by calling the origin directly.
 - **Database access.** The app connects with a privileged connection from server code

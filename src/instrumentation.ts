@@ -15,12 +15,14 @@ export async function register() {
   if (process.env.NODE_ENV !== 'production') return;
   const warn = (text: string) => console.warn(`[config] ${text}`);
   if (e.TRUSTED_PROXY === 'none') warn('TRUSTED_PROXY is none: branch network checks always fail and IP rate limits are off.');
+  if (e.TRUSTED_PROXY === 'vercel' && !process.env.VERCEL) warn('TRUSTED_PROXY is vercel but this is not Vercel: client IPs are ignored. Use cloudflare or none.');
   if (e.TRUSTED_PROXY === 'cloudflare' && !e.CLOUDFLARE_ORIGIN_SECRET) warn('TRUSTED_PROXY is cloudflare but CLOUDFLARE_ORIGIN_SECRET is not set: client IPs are ignored.');
   if (!e.CRON_SECRET) warn('CRON_SECRET is not set: scheduled jobs and clock reminders cannot run.');
   if (!e.TELEGRAM_WEBHOOK_SECRET) warn('TELEGRAM_WEBHOOK_SECRET is not set: the bot webhook is closed.');
   if (!e.APP_URL) warn('APP_URL is not set: bot messages have no "open app" button.');
   const local = /@(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(e.DATABASE_URL);
-  if (!local && !process.env.DATABASE_CA_CERT?.includes('BEGIN CERTIFICATE')) {
+  // DATABASE_TLS_UNVERIFIED=true says the operator chose this, e.g. a database on a private network.
+  if (!local && !process.env.DATABASE_CA_CERT?.includes('BEGIN CERTIFICATE') && process.env.DATABASE_TLS_UNVERIFIED !== 'true') {
     warn('DATABASE_CA_CERT is not set: the database connection is encrypted but the server certificate is not verified.');
   }
 }
